@@ -1,0 +1,15 @@
+# VPS overlay: app only on localhost:3000
+# System Caddy (host) terminates HTTPS for test-fas.ru and proxies here.
+# Docker Caddy from the base compose is disabled to avoid port conflicts.
+
+services:
+  web:
+    ports:
+      - "127.0.0.1:3000:3000"
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  caddy:
+    profiles:
+      - donotstart

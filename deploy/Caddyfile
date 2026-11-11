@@ -1,0 +1,8 @@
+# System Caddy on VPS (NOT the Docker Caddy service).
+# Install to: /etc/caddy/Caddyfile
+# Domain gets automatic HTTPS via Let's Encrypt.
+
+test-fas.ru {
+	encode gzip zstd
+	reverse_proxy 127.0.0.1:3000
+}

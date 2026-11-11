@@ -14,7 +14,7 @@ export const site = {
   sameDay: true,
   minOrder: '200 ₽',
   chemicals: ['PRO BRITE', 'ITALMAS', 'GRASS'],
-  url: 'https://svetlana-cleaning.local',
+  url: 'https://test-fas.ru',
   avitoUrl:
     'https://www.avito.ru/yoshkar-ola/predlozheniya_uslug/klining_uborka_kvartir_7204642491',
   developer: {
