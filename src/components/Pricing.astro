@@ -1,0 +1,254 @@
+---
+import { calculatorBase } from '../data/site.js';
+import { presentPriceItem, priceItems, pricesMeta } from '../data/prices.js';
+
+const initialItems = priceItems.filter((item) => item.enabled !== false).map(presentPriceItem);
+---
+
+<section class="section pricing" id="pricing">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">Цены</span>
+      <h2>Цены «от» — без сюрпризов в день уборки</h2>
+      <p data-prices-note>{pricesMeta.note}</p>
+      <p class="pricing-today">
+        Сегодня: <time data-live-date datetime=""></time>
+      </p>
+    </div>
+
+    <div class="calc reveal" id="calculator">
+      <h3>Калькулятор-ориентир</h3>
+      <form class="calc-form" id="calc-form">
+        <label>
+          Тип уборки
+          <select name="type" required>
+            <option value="maintain">Поддерживающая</option>
+            <option value="general" selected>Генеральная</option>
+            <option value="afterRepair">После ремонта</option>
+          </select>
+        </label>
+        <label>
+          Квартира
+          <select name="size" required>
+            <option value="studio">Студия</option>
+            <option value="one" selected>1-комнатная</option>
+            <option value="two">2-комнатная</option>
+            <option value="three">3-комнатная+</option>
+          </select>
+        </label>
+        <p class="calc-result">
+          Ориентир: <strong id="calc-price">от 5 900 ₽</strong>
+        </p>
+      </form>
+      <p class="calc-note">Итоговая цена зависит от площади и доп. опций. Парогенератор уже в стоимости.</p>
+    </div>
+
+    <div class="price-table reveal" role="table" aria-label="Прайс-лист" data-price-table>
+      {initialItems.map((row) => (
+        <div class="price-row" role="row" data-price-id={row.id}>
+          <div role="cell">
+            <strong>{row.name}</strong>
+            <span>{row.durationLabel}</span>
+          </div>
+          <div class="price-cell" role="cell">
+            <strong>{row.priceLabel}</strong>
+            {row.unitLabel ? <span>{row.unitLabel}</span> : null}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<script define:vars={{ calculatorBase }}>
+  const form = document.getElementById('calc-form');
+  const out = document.getElementById('calc-price');
+  const table = document.querySelector('[data-price-table]');
+  const noteEl = document.querySelector('[data-prices-note]');
+  const dateEl = document.querySelector('[data-live-date]');
+
+  const formatMoney = (n) => `от ${n.toLocaleString('ru-RU')} ₽`;
+
+  const escapeHtml = (value) =>
+    String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const updateCalc = () => {
+    if (!form || !out) return;
+    const data = new FormData(form);
+    const type = String(data.get('type') || 'general');
+    const size = String(data.get('size') || 'one');
+    const value = calculatorBase[type]?.[size] ?? 0;
+    out.textContent = formatMoney(value);
+  };
+
+  const formatLiveDate = (date = new Date()) => {
+    const formatted = new Intl.DateTimeFormat('ru-RU', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    }).format(date);
+    return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+  };
+
+  const tickDate = () => {
+    if (!dateEl) return;
+    const now = new Date();
+    dateEl.dateTime = now.toISOString();
+    dateEl.textContent = formatLiveDate(now);
+  };
+
+  const rowHtml = (item) => {
+    const unit = item.unitLabel
+      ? `<span>${escapeHtml(item.unitLabel)}</span>`
+      : '';
+    return `<div class="price-row" role="row" data-price-id="${escapeHtml(item.id)}"><div role="cell"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.durationLabel || '')}</span></div><div class="price-cell" role="cell"><strong>${escapeHtml(item.priceLabel)}</strong>${unit}</div></div>`;
+  };
+
+  const renderPrices = (payload) => {
+    if (!table || !Array.isArray(payload?.items) || !payload.items.length) return;
+    if (noteEl && payload.meta?.note) noteEl.textContent = payload.meta.note;
+    table.innerHTML = payload.items.map(rowHtml).join('');
+  };
+
+  const loadPrices = () => {
+    fetch('/api/prices', { headers: { Accept: 'application/json' } })
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then(renderPrices)
+      .catch(() => {
+        /* keep SSR fallback */
+      });
+  };
+
+  form?.addEventListener('change', updateCalc);
+  updateCalc();
+  tickDate();
+  loadPrices();
+  setInterval(tickDate, 60_000);
+</script>
+
+<style>
+  .pricing {
+    background: linear-gradient(180deg, transparent, rgba(15, 118, 110, 0.05));
+  }
+
+  .pricing-today {
+    margin: 0.85rem 0 0;
+    color: var(--color-teal);
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+
+  .calc {
+    background: var(--color-white);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    margin-bottom: 1.25rem;
+    box-shadow: var(--shadow-soft);
+  }
+
+  .calc h3 {
+    color: var(--color-forest);
+    margin-bottom: 1rem;
+  }
+
+  .calc-form {
+    display: grid;
+    gap: 0.9rem;
+  }
+
+  label {
+    display: grid;
+    gap: 0.4rem;
+    font-weight: 600;
+    color: var(--color-charcoal);
+    min-width: 0;
+  }
+
+  select {
+    min-height: 48px;
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+    padding: 0.55rem 0.8rem;
+    background: var(--color-mint);
+    width: 100%;
+  }
+
+  .calc-result {
+    margin: 0.25rem 0 0;
+    font-size: 1.15rem;
+  }
+
+  .calc-result strong {
+    color: var(--color-teal);
+    font-family: var(--font-display);
+    font-size: 1.4rem;
+  }
+
+  .calc-note {
+    margin: 0.85rem 0 0;
+    color: var(--color-muted);
+    font-size: 0.92rem;
+  }
+
+  .price-table {
+    display: grid;
+    gap: 0.55rem;
+  }
+
+  /* :global — строки пересобираются из /api/prices */
+  .pricing :global(.price-row) {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.75rem;
+    align-items: center;
+    background: var(--color-white);
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    padding: 0.9rem 1rem;
+    min-width: 0;
+  }
+
+  .pricing :global(.price-row > div:first-child) {
+    display: grid;
+    gap: 0.2rem;
+    min-width: 0;
+  }
+
+  .pricing :global(.price-row strong) {
+    color: var(--color-charcoal);
+  }
+
+  .pricing :global(.price-row span) {
+    color: var(--color-muted);
+    font-size: 0.88rem;
+  }
+
+  .pricing :global(.price-cell) {
+    text-align: right;
+    display: grid;
+    gap: 0.15rem;
+  }
+
+  .pricing :global(.price-cell strong) {
+    color: var(--color-forest);
+    white-space: nowrap;
+  }
+
+  @media (min-width: 800px) {
+    .calc-form {
+      grid-template-columns: 1fr 1fr auto;
+      align-items: end;
+    }
+
+    .calc-result {
+      padding-bottom: 0.35rem;
+    }
+  }
+</style>

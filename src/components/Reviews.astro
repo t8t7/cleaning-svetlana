@@ -1,0 +1,124 @@
+---
+import AvitoBadge from './AvitoBadge.astro';
+import { reviews, site } from '../data/site.js';
+---
+
+<section class="section reviews" id="reviews">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">Отзывы</span>
+      <h2>{site.rating.toFixed(1)} — так о нас пишут клиенты</h2>
+      <p>
+        Рейтинг {site.rating.toFixed(1)} на основе {site.reviewCount} отзывов. Чаще всего отмечают: быстрая
+        договорённость без лишних фото, пунктуальность, труднодоступные места и цену как договорились.
+      </p>
+    </div>
+
+    <div class="rating-banner reveal">
+      <div class="score">{site.rating.toFixed(1)}</div>
+      <div class="rating-copy">
+        <strong>{site.reviewCount} отзывов клиентов</strong>
+        <p>Скорость договорённости · Аккуратность · Честная цена</p>
+      </div>
+      <AvitoBadge />
+    </div>
+
+    <div class="review-grid">
+      {reviews.map((review) => (
+        <article class="review reveal">
+          <div class="stars" aria-label="Оценка 5 из 5">★★★★★</div>
+          <p>{review.text}</p>
+          <footer>{review.name}</footer>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .reviews {
+    background: linear-gradient(180deg, rgba(240, 253, 250, 0.85), transparent);
+  }
+
+  .rating-banner {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: center;
+    background: var(--color-white);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 1rem 1.15rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .rating-copy {
+    flex: 1 1 12rem;
+    min-width: 0;
+  }
+
+  .score {
+    min-width: 64px;
+    height: 64px;
+    border-radius: 16px;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(145deg, var(--color-lime), #4d7c0f);
+    color: white;
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 1.4rem;
+  }
+
+  .rating-banner strong {
+    color: var(--color-forest);
+  }
+
+  .rating-banner p {
+    margin: 0.25rem 0 0;
+    color: var(--color-muted);
+  }
+
+  .review-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: 1fr;
+  }
+
+  .review {
+    background: var(--color-white);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 1.15rem;
+    min-width: 0;
+  }
+
+  .stars {
+    color: #ca8a04;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.55rem;
+  }
+
+  .review p {
+    margin: 0;
+    color: var(--color-charcoal);
+  }
+
+  .review footer {
+    margin-top: 0.85rem;
+    font-weight: 700;
+    color: var(--color-teal);
+  }
+
+  @media (min-width: 800px) {
+    .review-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1100px) {
+    .review-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+</style>

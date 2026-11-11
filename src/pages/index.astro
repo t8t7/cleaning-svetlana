@@ -1,0 +1,110 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Header from '../components/Header.astro';
+import Hero from '../components/Hero.astro';
+import LiveAvailability from '../components/LiveAvailability.astro';
+import TrustStrip from '../components/TrustStrip.astro';
+import Services from '../components/Services.astro';
+import HowItWorks from '../components/HowItWorks.astro';
+import Checklist from '../components/Checklist.astro';
+import Pricing from '../components/Pricing.astro';
+import About from '../components/About.astro';
+import BeforeAfter from '../components/BeforeAfter.astro';
+import CleanFrames from '../components/CleanFrames.astro';
+import Reviews from '../components/Reviews.astro';
+import Area from '../components/Area.astro';
+import Faq from '../components/Faq.astro';
+import Footer from '../components/Footer.astro';
+import MobileCta from '../components/MobileCta.astro';
+import { faq, site } from '../data/site.js';
+
+const localBusiness = {
+  '@context': 'https://schema.org',
+  '@type': 'HomeAndConstructionBusiness',
+  '@id': `${site.url}/#business`,
+  name: `${site.brand} — уборка квартир`,
+  description: site.slogan,
+  url: site.url,
+  telephone: site.phoneTel,
+  image: `${site.url}/og-image.jpg`,
+  priceRange: '₽₽',
+  address: {
+    '@type': 'PostalAddress',
+    streetAddress: site.address,
+    addressLocality: site.city,
+    addressRegion: site.region,
+    addressCountry: 'RU',
+  },
+  areaServed: {
+    '@type': 'City',
+    name: site.city,
+  },
+  aggregateRating: {
+    '@type': 'AggregateRating',
+    ratingValue: String(site.rating),
+    reviewCount: String(site.reviewCount),
+    bestRating: '5',
+    worstRating: '1',
+  },
+  openingHoursSpecification: {
+    '@type': 'OpeningHoursSpecification',
+    dayOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+    opens: '08:00',
+    closes: '21:00',
+  },
+};
+
+const servicesLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Service',
+  serviceType: 'Уборка квартир',
+  provider: { '@id': `${site.url}/#business` },
+  areaServed: site.city,
+  offers: {
+    '@type': 'Offer',
+    priceCurrency: 'RUB',
+    price: '200',
+    priceSpecification: {
+      '@type': 'UnitPriceSpecification',
+      priceCurrency: 'RUB',
+      price: '200',
+      unitText: 'м²',
+    },
+    description: 'Генеральная уборка квартир от 200 ₽ за м²',
+  },
+};
+
+const faqLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faq.map((item) => ({
+    '@type': 'Question',
+    name: item.q,
+    acceptedAnswer: {
+      '@type': 'Answer',
+      text: item.a,
+    },
+  })),
+};
+---
+
+<BaseLayout jsonLd={[localBusiness, servicesLd, faqLd]}>
+  <Header />
+  <main>
+    <Hero />
+    <LiveAvailability />
+    <TrustStrip />
+    <Services />
+    <HowItWorks />
+    <Checklist />
+    <Pricing />
+    <About />
+    <BeforeAfter />
+    <CleanFrames />
+    <Reviews />
+    <Area />
+    <Faq />
+  </main>
+  <Footer />
+  <MobileCta />
+</BaseLayout>

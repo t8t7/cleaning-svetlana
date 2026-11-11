@@ -1,0 +1,87 @@
+---
+import { site } from '../data/site.js';
+---
+
+<section class="trust" aria-label="Преимущества">
+  <div class="container trust-grid">
+    <div class="trust-item">
+      <strong>{site.rating.toFixed(1)}</strong>
+      <span>{site.reviewCount} отзывов клиентов</span>
+    </div>
+    <div class="trust-item">
+      <strong>Сегодня</strong>
+      <span>Выезд в день заказа</span>
+    </div>
+    <div class="trust-item">
+      <strong>Свои средства</strong>
+      <span>PRO BRITE · ITALMAS · GRASS</span>
+    </div>
+    <div class="trust-item">
+      <strong>Пар в цене</strong>
+      <span>Парогенератор включён</span>
+    </div>
+    <div class="trust-item">
+      <strong>После приёмки</strong>
+      <span>Оплата по результату</span>
+    </div>
+  </div>
+</section>
+
+<style>
+  .trust {
+    margin-top: -1.5rem;
+    position: relative;
+    z-index: 2;
+    padding: 0 0 1rem;
+  }
+
+  .trust-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid var(--color-border);
+    border-radius: calc(var(--radius) + 4px);
+    box-shadow: var(--shadow-soft);
+    padding: 1rem;
+  }
+
+  .trust-item {
+    display: grid;
+    gap: 0.2rem;
+    padding: 0.55rem 0.4rem;
+    min-width: 0;
+  }
+
+  .trust-item strong {
+    font-family: var(--font-display);
+    color: var(--color-forest);
+    font-size: 1.05rem;
+  }
+
+  .trust-item span {
+    color: var(--color-muted);
+    font-size: 0.88rem;
+    line-height: 1.35;
+  }
+
+  @media (min-width: 640px) and (max-width: 999px) {
+    .trust-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      padding: 1.1rem 1.25rem;
+    }
+  }
+
+  @media (min-width: 1000px) {
+    .trust-grid {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      padding: 1.1rem 1.25rem;
+    }
+  }
+
+  @media (max-width: 639px) {
+    .trust-item:last-child {
+      grid-column: 1 / -1;
+    }
+  }
+</style>

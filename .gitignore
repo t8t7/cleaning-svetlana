@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.astro/
+
+# secrets / local env
+.env
+.env.*
+!.env.example
+
+# runtime data on server (not source)
+data/leads.jsonl
+data/*.json
+data/uploads/
+!data/.gitkeep
+
+# local QA dumps
+releases/qa-*.png
+releases/qa-v-*.png
+releases/qa-key-*.png
+releases/qa-final-*.png
+releases/qa-eval-*.png

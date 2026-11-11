@@ -1,0 +1,240 @@
+---
+const pairs = [
+  {
+    before: '/images/works/before-kitchen.jpg',
+    after: '/images/works/after-kitchen.jpg',
+    caption: 'Кухня: до и после генеральной уборки',
+  },
+  {
+    before: '/images/works/before-window.jpg',
+    after: '/images/works/after-window.jpg',
+    caption: 'Окна и балкон: прозрачность без разводов',
+  },
+];
+---
+
+<section class="section" id="works">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">Работы</span>
+      <h2>До и после — видно сразу</h2>
+      <p>Реальные объекты: кухни, окна, балконы. Передвигайте ползунок, чтобы сравнить.</p>
+    </div>
+
+    <div class="works-grid">
+      {pairs.map((pair) => (
+        <figure class="ba reveal">
+          <div class="ba-frame" data-ba style={`--pos: 50%`}>
+            <img class="ba-after" src={pair.after} alt={`После: ${pair.caption}`} width="1000" height="750" loading="lazy" />
+            <div class="ba-before-wrap">
+              <img class="ba-before" src={pair.before} alt={`До: ${pair.caption}`} width="1000" height="750" loading="lazy" />
+            </div>
+            <input
+              class="ba-range"
+              type="range"
+              min="0"
+              max="100"
+              value="50"
+              aria-label={`Сравнение до и после: ${pair.caption}`}
+              data-ba-range
+            />
+            <div class="ba-handle" aria-hidden="true"></div>
+            <span class="ba-label ba-label-before">До</span>
+            <span class="ba-label ba-label-after">После</span>
+          </div>
+          <figcaption>{pair.caption}</figcaption>
+        </figure>
+      ))}
+
+      <figure class="static-work reveal">
+        <img
+          src="/images/works/result-kitchen-detail.jpg"
+          alt="Деталь кухни после профессиональной уборки"
+          width="900"
+          height="700"
+          loading="lazy"
+        />
+        <figcaption>Аккуратность до блеска — внимание к деталям</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll('[data-ba]').forEach((frame) => {
+    const range = frame.querySelector('[data-ba-range]');
+    const beforeWrap = frame.querySelector('.ba-before-wrap');
+    const beforeImg = frame.querySelector('.ba-before');
+    const handle = frame.querySelector('.ba-handle');
+    if (
+      !(range instanceof HTMLInputElement) ||
+      !(beforeWrap instanceof HTMLElement) ||
+      !(beforeImg instanceof HTMLElement) ||
+      !(handle instanceof HTMLElement)
+    ) {
+      return;
+    }
+
+    const syncWidth = () => {
+      beforeImg.style.width = `${frame.clientWidth}px`;
+    };
+
+    const apply = () => {
+      const value = range.value;
+      frame.style.setProperty('--pos', `${value}%`);
+      beforeWrap.style.width = `${value}%`;
+      handle.style.left = `${value}%`;
+    };
+
+    range.addEventListener('input', apply);
+    window.addEventListener('resize', syncWidth);
+    syncWidth();
+    apply();
+  });
+</script>
+
+<style>
+  .works-grid {
+    display: grid;
+    gap: 1.25rem;
+  }
+
+  .ba {
+    margin: 0;
+    min-width: 0;
+  }
+
+  .ba-frame {
+    position: relative;
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    aspect-ratio: 4 / 3;
+    background: #e2e8f0;
+    user-select: none;
+    touch-action: pan-y;
+  }
+
+  .ba-frame img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .ba-after {
+    position: absolute;
+    inset: 0;
+  }
+
+  .ba-before-wrap {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 50%;
+    overflow: hidden;
+    border-right: 2px solid rgba(255, 255, 255, 0.9);
+  }
+
+  .ba-before {
+    position: absolute;
+    top: 0;
+    left: 0;
+    max-width: none;
+    height: 100%;
+    width: 100%;
+    object-fit: cover;
+  }
+
+  .ba-range {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: ew-resize;
+    margin: 0;
+    z-index: 3;
+  }
+
+  .ba-handle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: var(--color-white);
+    border: 3px solid var(--color-teal);
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25);
+    pointer-events: none;
+  }
+
+  .ba-handle::before,
+  .ba-handle::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    width: 7px;
+    height: 7px;
+    border-top: 2px solid var(--color-teal);
+    border-right: 2px solid var(--color-teal);
+  }
+
+  .ba-handle::before {
+    left: 10px;
+    transform: translateY(-50%) rotate(-135deg);
+  }
+
+  .ba-handle::after {
+    right: 10px;
+    transform: translateY(-50%) rotate(45deg);
+  }
+
+  .ba-label {
+    position: absolute;
+    top: 0.75rem;
+    z-index: 2;
+    background: rgba(17, 94, 89, 0.85);
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.25rem 0.55rem;
+    border-radius: 999px;
+    pointer-events: none;
+  }
+
+  .ba-label-before {
+    left: 0.75rem;
+  }
+
+  .ba-label-after {
+    right: 0.75rem;
+  }
+
+  .static-work {
+    margin: 0;
+    min-width: 0;
+  }
+
+  .static-work img {
+    width: 100%;
+    height: 100%;
+    max-height: 420px;
+    object-fit: cover;
+    border-radius: var(--radius);
+    border: 1px solid var(--color-border);
+  }
+
+  figcaption {
+    margin-top: 0.65rem;
+    color: var(--color-muted);
+    font-weight: 500;
+  }
+
+  @media (min-width: 900px) {
+    .works-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+</style>

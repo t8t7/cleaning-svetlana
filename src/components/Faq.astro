@@ -1,0 +1,64 @@
+---
+import { faq } from '../data/site.js';
+---
+
+<section class="section" id="faq">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">FAQ</span>
+      <h2>Частые вопросы</h2>
+      <p>Коротко о том, что обычно волнует перед первой уборкой.</p>
+    </div>
+
+    <div class="faq-list">
+      {faq.map((item) => (
+        <details class="faq-item reveal">
+          <summary>{item.q}</summary>
+          <p>{item.a}</p>
+        </details>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .faq-list {
+    display: grid;
+    gap: 0.75rem;
+    max-width: 820px;
+  }
+
+  .faq-item {
+    background: var(--color-white);
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    padding: 0.35rem 1rem;
+  }
+
+  summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: var(--color-forest);
+    padding: 0.85rem 0;
+    list-style: none;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  summary::after {
+    content: '+';
+    float: right;
+    color: var(--color-teal);
+  }
+
+  details[open] summary::after {
+    content: '–';
+  }
+
+  .faq-item p {
+    margin: 0 0 1rem;
+    color: var(--color-muted);
+  }
+</style>

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://svetlana-cleaning.local/sitemap.xml

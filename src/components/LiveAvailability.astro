@@ -1,0 +1,607 @@
+---
+import { site } from '../data/site.js';
+import {
+  availabilityMeta,
+  buildDaySlots,
+  getLiveStatus,
+  weekPlan,
+} from '../data/availability.js';
+
+const live = getLiveStatus(weekPlan);
+const initialDayKey = live.today.key;
+---
+
+<section class="live-avail" id="schedule" aria-labelledby="live-avail-title">
+  <div class="container">
+    <div class="live-card reveal">
+      <div class={`live-pulse state-${live.state}`} data-live-pulse>
+        <span class="pulse-dot" aria-hidden="true"></span>
+        <div class="live-pulse-copy">
+          <p class="live-kicker">{availabilityMeta.note}</p>
+          <h2 id="live-avail-title" data-live-title>{live.title}</h2>
+          <p class="live-detail" data-live-detail>{live.detail}</p>
+        </div>
+        <a class="btn btn-primary live-call" href={`tel:${site.phoneTel}`}>Позвонить</a>
+      </div>
+
+      <div class="week-strip" role="tablist" aria-label="Расписание на неделю">
+        {weekPlan.map((day) => (
+          <button
+            type="button"
+            class={`day-chip status-${day.status}`}
+            role="tab"
+            aria-selected={day.key === initialDayKey ? 'true' : 'false'}
+            data-day-key={day.key}
+            data-day-status={day.status}
+            data-busy={JSON.stringify(day.busyRanges)}
+            data-label={`${day.label}, ${day.shortDate}`}
+          >
+            <span class="day-name">{day.label}</span>
+            <span class="day-date">{day.shortDate}</span>
+            <span class="day-state">
+              <span class="day-state-full">
+                {day.status === 'free' ? 'Свободно' : day.status === 'busy' ? 'Занято' : 'Частично'}
+              </span>
+              <span class="day-state-short" aria-hidden="true">
+                {day.status === 'free' ? 'Своб.' : day.status === 'busy' ? 'Занят.' : 'Часть'}
+              </span>
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <div class="day-panel">
+        <div class="day-panel-head">
+          <h3 data-day-heading>
+            {live.today.label}, {live.today.shortDate}
+          </h3>
+          <p data-day-summary>
+            {live.today.status === 'free'
+              ? 'Весь день свободен для записи'
+              : live.today.status === 'busy'
+                ? 'В этот день мест нет'
+                : 'Есть свободные окна между заказами'}
+          </p>
+        </div>
+
+        <div class="slots" data-slots>
+          {buildDaySlots(live.today).map((slot) => (
+            <div class={`slot ${slot.busy ? 'is-busy' : 'is-free'}`}>
+              <span class="slot-time">{slot.label}</span>
+              <span
+                class={`slot-dot ${slot.busy ? 'busy' : 'free'}`}
+                aria-hidden="true"
+              ></span>
+              <strong>{slot.busy ? 'Занято' : 'Свободно'}</strong>
+            </div>
+          ))}
+        </div>
+
+        <p class="legend">
+          <span class="leg free"></span> Свободно
+          <span class="leg busy"></span> Занято
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  const startHour = 8;
+  const endHour = 20;
+
+  const formatHour = (h) => `${String(Math.floor(h)).padStart(2, '0')}:00`;
+  const escapeHtml = (value) =>
+    String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const root = document.querySelector('.live-avail');
+  const pulse = document.querySelector('[data-live-pulse]');
+  const liveTitle = document.querySelector('[data-live-title]');
+  const liveDetail = document.querySelector('[data-live-detail]');
+  const liveKicker = document.querySelector('.live-kicker');
+  const weekStrip = document.querySelector('.week-strip');
+  const slots = document.querySelector('[data-slots]');
+  const dayHeading = document.querySelector('[data-day-heading]');
+  const daySummary = document.querySelector('[data-day-summary]');
+
+  const scopeAttr = (() => {
+    const sample = slots?.querySelector('.slot') || slots || root;
+    if (!sample) return '';
+    const name = Array.from(sample.attributes).find((a) => a.name.startsWith('data-astro-cid-'))?.name;
+    return name ? ` ${name}` : '';
+  })();
+
+  const statusLabel = {
+    free: 'Свободно',
+    busy: 'Занято',
+    partial: 'Частично',
+  };
+
+  const summaryByStatus = {
+    free: 'Весь день свободен для записи',
+    busy: 'В этот день мест нет',
+    partial: 'Есть свободные окна между заказами',
+  };
+
+  const buildSlotsHtml = (busyRanges) => {
+    let html = '';
+    for (let h = startHour; h < endHour; h += 1) {
+      const busy = busyRanges.some((r) => h >= r.from && h < r.to);
+      html += `<div class="slot ${busy ? 'is-busy' : 'is-free'}"${scopeAttr}><span class="slot-time"${scopeAttr}>${formatHour(h)}–${formatHour(h + 1)}</span><span class="slot-dot ${busy ? 'busy' : 'free'}" aria-hidden="true"${scopeAttr}></span><strong${scopeAttr}>${busy ? 'Занято' : 'Свободно'}</strong></div>`;
+    }
+    return html;
+  };
+
+  const selectDay = (chip) => {
+    const chips = Array.from(document.querySelectorAll('[data-day-key]'));
+    chips.forEach((c) => c.setAttribute('aria-selected', 'false'));
+    chip.setAttribute('aria-selected', 'true');
+
+    const status = chip.getAttribute('data-day-status') || 'free';
+    const label = chip.getAttribute('data-label') || '';
+    const busyRanges = JSON.parse(chip.getAttribute('data-busy') || '[]');
+
+    if (dayHeading) dayHeading.textContent = label;
+    if (daySummary) daySummary.textContent = summaryByStatus[status] || summaryByStatus.partial;
+    if (slots) slots.innerHTML = buildSlotsHtml(busyRanges);
+  };
+
+  const bindChips = () => {
+    document.querySelectorAll('[data-day-key]').forEach((chip) => {
+      chip.addEventListener('click', () => selectDay(chip));
+    });
+  };
+
+  const withLocalWeekDates = (plan) => {
+    const now = new Date();
+    const dayIndex = (now.getDay() + 6) % 7;
+    const monday = new Date(now);
+    monday.setHours(12, 0, 0, 0);
+    monday.setDate(now.getDate() - dayIndex);
+    return plan.map((day, i) => {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + i);
+      const d = String(date.getDate()).padStart(2, '0');
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      return { ...day, shortDate: `${d}.${m}` };
+    });
+  };
+
+  const refreshSsrDates = () => {
+    if (!weekStrip) return;
+    const chips = [...weekStrip.querySelectorAll('[data-day-key]')];
+    if (!chips.length) return;
+    const dated = withLocalWeekDates(
+      chips.map((chip) => ({
+        key: chip.getAttribute('data-day-key'),
+        shortDate: '',
+      }))
+    );
+    chips.forEach((chip, i) => {
+      const dateEl = chip.querySelector('.day-date');
+      if (dateEl) dateEl.textContent = dated[i].shortDate;
+      const label = chip.querySelector('.day-name')?.textContent || '';
+      chip.setAttribute('data-label', `${label}, ${dated[i].shortDate}`);
+    });
+  };
+
+  const applyAvailability = (data) => {
+    const plan = withLocalWeekDates(Array.isArray(data.weekPlan) ? data.weekPlan : []);
+    if (!plan.length || !weekStrip) return;
+
+    const live = data.live || {};
+    if (pulse) {
+      pulse.classList.remove('state-free', 'state-busy', 'state-busy-now');
+      pulse.classList.add(`state-${live.state || 'free'}`);
+    }
+    if (liveTitle) liveTitle.textContent = live.title || 'Сейчас свободна';
+    if (liveDetail) liveDetail.textContent = live.detail || '';
+    if (liveKicker && data.meta?.note) liveKicker.textContent = data.meta.note;
+
+    const selectedKey = live.today?.key || plan[((new Date().getDay() + 6) % 7)];
+    weekStrip.innerHTML = plan
+      .map((day) => {
+        const selected = day.key === selectedKey;
+        const status = ['free', 'busy', 'partial'].includes(day.status) ? day.status : 'partial';
+        const key = escapeHtml(day.key);
+        const label = escapeHtml(day.label);
+        const shortDate = escapeHtml(day.shortDate);
+        const busy = escapeHtml(JSON.stringify(day.busyRanges || []));
+        const stateText = escapeHtml(statusLabel[status] || statusLabel.partial);
+        const stateShort =
+          status === 'free' ? 'Своб.' : status === 'busy' ? 'Занят.' : 'Часть';
+        return `<button type="button" class="day-chip status-${status}" role="tab" aria-selected="${selected ? 'true' : 'false'}" data-day-key="${key}" data-day-status="${status}" data-busy="${busy}" data-label="${label}, ${shortDate}"${scopeAttr}><span class="day-name"${scopeAttr}>${label}</span><span class="day-date"${scopeAttr}>${shortDate}</span><span class="day-state"${scopeAttr}><span class="day-state-full"${scopeAttr}>${stateText}</span><span class="day-state-short" aria-hidden="true"${scopeAttr}>${stateShort}</span></span></button>`;
+      })
+      .join('');
+
+    bindChips();
+    const active = weekStrip.querySelector(`[data-day-key="${selectedKey}"]`) || weekStrip.querySelector('[data-day-key]');
+    if (active) selectDay(active);
+  };
+
+  bindChips();
+  refreshSsrDates();
+
+  fetch('/api/availability', { headers: { Accept: 'application/json' } })
+    .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+    .then(applyAvailability)
+    .catch(() => {
+      refreshSsrDates();
+    });
+</script>
+
+<style>
+  .live-avail {
+    padding: 0 0 1.25rem;
+    margin-top: -0.35rem;
+    position: relative;
+    z-index: 3;
+  }
+
+  .live-card {
+    --live-pad-x: 1.1rem;
+    background: #fff;
+    border: 1px solid var(--color-border);
+    border-radius: calc(var(--radius) + 6px);
+    box-shadow: var(--shadow-soft);
+    overflow: hidden;
+  }
+
+  .live-pulse {
+    display: grid;
+    gap: 0.85rem;
+    padding: 1.15rem var(--live-pad-x) 1.05rem;
+    background:
+      radial-gradient(500px 180px at 0% 0%, rgba(132, 204, 22, 0.18), transparent 60%),
+      linear-gradient(135deg, #0f766e 0%, #115e59 100%);
+    color: #fff;
+    align-items: center;
+  }
+
+  .live-pulse.state-busy,
+  .live-pulse.state-busy-now {
+    background:
+      radial-gradient(500px 180px at 0% 0%, rgba(251, 146, 60, 0.22), transparent 60%),
+      linear-gradient(135deg, #9a3412 0%, #7c2d12 100%);
+  }
+
+  .pulse-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #bef264;
+    box-shadow: 0 0 0 0 rgba(190, 242, 100, 0.7);
+    animation: pulse 1.8s infinite;
+    justify-self: start;
+  }
+
+  .state-busy .pulse-dot,
+  .state-busy-now .pulse-dot {
+    background: #fdba74;
+    box-shadow: 0 0 0 0 rgba(253, 186, 116, 0.7);
+  }
+
+  .live-kicker {
+    margin: 0;
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    opacity: 0.85;
+  }
+
+  .live-pulse-copy h2 {
+    margin: 0.2rem 0 0.35rem;
+    font-size: clamp(1.45rem, 4vw, 2rem);
+    letter-spacing: -0.02em;
+  }
+
+  .live-detail {
+    margin: 0;
+    opacity: 0.92;
+    max-width: 40rem;
+  }
+
+  .live-call {
+    justify-self: start;
+  }
+
+  .week-strip {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 0.45rem;
+    padding: 0.9rem var(--live-pad-x) 0.35rem;
+    overflow-x: hidden;
+  }
+
+  .day-chip {
+    border: 1px solid var(--color-border);
+    background: #f8faf9;
+    border-radius: 14px;
+    padding: 0.55rem 0.35rem;
+    display: grid;
+    gap: 0.15rem;
+    text-align: center;
+    cursor: pointer;
+    min-width: 0;
+    color: var(--color-charcoal);
+    transition: transform 0.2s var(--ease), border-color 0.2s var(--ease), background 0.2s var(--ease);
+  }
+
+  .day-chip:hover {
+    transform: translateY(-2px);
+  }
+
+  .day-chip[aria-selected='true'] {
+    border-color: var(--color-teal);
+    background: #ecfdf5;
+    box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.2);
+  }
+
+  .day-name {
+    font-weight: 800;
+    font-family: var(--font-display);
+    color: var(--color-forest);
+  }
+
+  .day-date {
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+
+  .day-state {
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+
+  .day-state-short {
+    display: none;
+  }
+
+  .status-free .day-state {
+    color: #15803d;
+  }
+
+  .status-busy .day-state {
+    color: #c2410c;
+  }
+
+  .status-partial .day-state {
+    color: #a16207;
+  }
+
+  .day-panel {
+    padding: 0.55rem var(--live-pad-x) 1.1rem;
+  }
+
+  .day-panel-head h3 {
+    margin: 0;
+    color: var(--color-forest);
+    font-size: 1.05rem;
+  }
+
+  .day-panel-head p {
+    margin: 0.25rem 0 0.75rem;
+    color: var(--color-muted);
+  }
+
+  .slots {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  /* :global — слоты пересобираются JS при смене дня */
+  .live-avail :global(.slot) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'time dot'
+      'label label';
+    column-gap: 0.4rem;
+    row-gap: 0.2rem;
+    align-items: center;
+    border-radius: 12px;
+    padding: 0.55rem 0.65rem;
+    font-size: 0.9rem;
+    min-width: 0;
+  }
+
+  .live-avail :global(.slot.is-free) {
+    background: #ecfdf5;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+  }
+
+  .live-avail :global(.slot.is-busy) {
+    background: #fff7ed;
+    color: #9a3412;
+    border: 1px solid #fed7aa;
+  }
+
+  .live-avail :global(.slot-time) {
+    grid-area: time;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .live-avail :global(.slot-dot) {
+    grid-area: dot;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+  }
+
+  .live-avail :global(.slot-dot.free) {
+    background: #22c55e;
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.65);
+    animation: slot-pulse-free 1.8s infinite;
+  }
+
+  .live-avail :global(.slot-dot.busy) {
+    background: #ea580c;
+    box-shadow: 0 0 0 0 rgba(234, 88, 12, 0.65);
+    animation: slot-pulse-busy 1.8s infinite;
+  }
+
+  .live-avail :global(.slot strong) {
+    grid-area: label;
+    white-space: nowrap;
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+
+  @keyframes slot-pulse-free {
+    0% {
+      box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.65);
+    }
+    70% {
+      box-shadow: 0 0 0 10px rgba(34, 197, 94, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+    }
+  }
+
+  @keyframes slot-pulse-busy {
+    0% {
+      box-shadow: 0 0 0 0 rgba(234, 88, 12, 0.65);
+    }
+    70% {
+      box-shadow: 0 0 0 10px rgba(234, 88, 12, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(234, 88, 12, 0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pulse-dot,
+    .live-avail :global(.slot-dot.free),
+    .live-avail :global(.slot-dot.busy) {
+      animation: none;
+    }
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem 1rem;
+    align-items: center;
+    margin: 0.85rem 0 0;
+    color: var(--color-muted);
+    font-size: 0.85rem;
+  }
+
+  .leg {
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 0.25rem;
+  }
+
+  .leg.free {
+    background: #22c55e;
+  }
+
+  .leg.busy {
+    background: #ea580c;
+  }
+
+  @keyframes pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgba(190, 242, 100, 0.65);
+    }
+    70% {
+      box-shadow: 0 0 0 12px rgba(190, 242, 100, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(190, 242, 100, 0);
+    }
+  }
+
+  @media (min-width: 800px) {
+    .live-pulse {
+      grid-template-columns: auto 1fr auto;
+      column-gap: 0.9rem;
+    }
+
+    .pulse-dot {
+      align-self: center;
+    }
+
+    .live-call {
+      justify-self: end;
+    }
+
+    .live-avail :global(.slots),
+    .slots {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .live-avail :global(.slot) {
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      grid-template-areas: 'time dot label';
+    }
+
+    .live-avail :global(.slot strong) {
+      font-size: 0.9rem;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .week-strip {
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 0.28rem;
+      padding: 0.75rem 0.55rem 0.5rem;
+    }
+
+    .day-chip {
+      padding: 0.4rem 0.12rem;
+      border-radius: 12px;
+    }
+
+    .day-name {
+      font-size: 0.78rem;
+    }
+
+    .day-date {
+      font-size: 0.62rem;
+    }
+
+    .day-state {
+      font-size: 0.55rem;
+    }
+
+    .day-state-full {
+      display: none;
+    }
+
+    .day-state-short {
+      display: inline;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .live-card {
+      --live-pad-x: 0.95rem;
+    }
+
+    .slots {
+      grid-template-columns: 1fr;
+    }
+
+    .live-pulse {
+      padding-block: 1rem 0.95rem;
+    }
+  }
+</style>

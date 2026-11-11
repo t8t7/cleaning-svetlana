@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "Светлана Расписание",
+    "slug": "svetlana-schedule",
+    "version": "1.0.1",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Нужен доступ к фото, чтобы загружать «Чистые кадры» на сайт."
+        }
+      ]
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "ru.svetlana.cleaning.schedule"
+    },
+    "android": {
+      "package": "ru.svetlana.cleaning.schedule",
+      "versionCode": 3,
+      "usesCleartextTraffic": true,
+      "adaptiveIcon": {
+        "backgroundColor": "#0f766e",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "local-svetlana-schedule"
+      }
+    }
+  }
+}

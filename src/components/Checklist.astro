@@ -1,0 +1,109 @@
+---
+import { advantages, checklist, site } from '../data/site.js';
+---
+
+<section class="section" id="checklist">
+  <div class="container checklist-layout">
+    <div class="section-head reveal">
+      <span class="eyebrow">Что входит</span>
+      <h2>Что делаем в квартире — по комнатам</h2>
+      <p>
+        Парогенератор для оконных рам, сантехники и радиаторов входит в стоимость. Химия:
+        {site.chemicals.join(', ')}.
+      </p>
+    </div>
+
+    <div class="panels">
+      <article class="panel reveal">
+        <h3>Кухня</h3>
+        <ul>
+          {checklist.kitchen.map((item) => <li>{item}</li>)}
+        </ul>
+      </article>
+      <article class="panel reveal">
+        <h3>Санузел</h3>
+        <ul>
+          {checklist.bathroom.map((item) => <li>{item}</li>)}
+        </ul>
+      </article>
+      <article class="panel reveal">
+        <h3>Комнаты</h3>
+        <ul>
+          {checklist.rooms.map((item) => <li>{item}</li>)}
+        </ul>
+      </article>
+    </div>
+
+    <ul class="advantages reveal">
+      {advantages.map((item) => <li>{item}</li>)}
+    </ul>
+  </div>
+</section>
+
+<style>
+  .panels {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: 1fr;
+    margin-bottom: 1.5rem;
+  }
+
+  .panel {
+    background: var(--color-white);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 1.2rem 1.2rem 0.9rem;
+    min-width: 0;
+  }
+
+  .panel h3 {
+    color: var(--color-forest);
+    margin-bottom: 0.75rem;
+  }
+
+  .panel ul,
+  .advantages {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 0.55rem;
+  }
+
+  .panel li,
+  .advantages li {
+    position: relative;
+    padding-left: 1.5rem;
+    color: var(--color-muted);
+  }
+
+  .panel li::before,
+  .advantages li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.45rem;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    background: linear-gradient(145deg, var(--color-lime), var(--color-teal));
+  }
+
+  .advantages {
+    background: linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(132, 204, 22, 0.12));
+    border-radius: var(--radius);
+    padding: 1.25rem 1.25rem 1.25rem 1.1rem;
+    border: 1px solid var(--color-border);
+  }
+
+  .advantages li {
+    color: var(--color-charcoal);
+    font-weight: 500;
+  }
+
+  @media (min-width: 900px) {
+    .panels {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+</style>

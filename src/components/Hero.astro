@@ -1,0 +1,73 @@
+---
+import { site } from '../data/site.js';
+---
+
+<section class="hero" aria-labelledby="hero-heading">
+  <div class="hero-banner">
+    <img
+      src="/images/hero-svetlana.jpg"
+      alt={`${site.brand} — уборка квартир с заботой о вашем доме, ${site.city}`}
+      width="1672"
+      height="941"
+      fetchpriority="high"
+    />
+  </div>
+
+  <div class="hero-panel">
+    <div class="container hero-panel-inner">
+      <p class="eyebrow hero-city">{site.city}</p>
+      <h1 id="hero-heading" class="sr-only">{site.brand} — уборка квартир с заботой о вашем доме</h1>
+      <p class="hero-lead">
+        Договариваемся просто — без лишних фото и бюрократии. Приезжаем со своими средствами и парогенератором (уже в
+        стоимости), убираем аккуратно. Выезд по всему городу, в том числе в день заказа.
+      </p>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero {
+    display: grid;
+    background: #0b3f3b;
+  }
+
+  .hero-banner {
+    width: 100%;
+    background: #0b3f3b;
+    line-height: 0;
+  }
+
+  .hero-banner img {
+    width: 100%;
+    height: auto;
+    max-height: min(72vh, 720px);
+    object-fit: contain;
+    object-position: center center;
+    margin-inline: auto;
+  }
+
+  .hero-panel {
+    background: linear-gradient(180deg, #0f766e 0%, #115e59 100%);
+    color: var(--color-white);
+    padding: 1.35rem 0 1.6rem;
+  }
+
+  .hero-panel-inner {
+    display: grid;
+    gap: 0.85rem;
+    align-items: start;
+  }
+
+  .hero-city {
+    color: #d9f99d;
+    margin: 0;
+  }
+
+  .hero-lead {
+    margin: 0;
+    max-width: 52rem;
+    color: rgba(255, 255, 255, 0.95);
+    font-size: clamp(1rem, 2.2vw, 1.12rem);
+    line-height: 1.55;
+  }
+</style>

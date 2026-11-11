@@ -1,0 +1,76 @@
+---
+import { steps } from '../data/site.js';
+---
+
+<section class="section how" id="how">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">Как это работает</span>
+      <h2>От заявки до чистого дома — 4 шага</h2>
+      <p>Без лишней суеты: быстро договариваемся, аккуратно убираем, вы принимаете результат.</p>
+    </div>
+
+    <ol class="steps">
+      {steps.map((step, index) => (
+        <li class="step reveal">
+          <span class="num">{String(index + 1).padStart(2, '0')}</span>
+          <h3>{step.title}</h3>
+          <p>{step.text}</p>
+        </li>
+      ))}
+    </ol>
+  </div>
+</section>
+
+<style>
+  .how {
+    background: linear-gradient(180deg, rgba(240, 253, 250, 0.7), rgba(255, 255, 255, 0.2));
+  }
+
+  .steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: 1fr;
+  }
+
+  .step {
+    background: var(--color-white);
+    border-radius: var(--radius);
+    border: 1px solid var(--color-border);
+    padding: 1.25rem;
+    min-width: 0;
+  }
+
+  .num {
+    display: inline-block;
+    font-family: var(--font-display);
+    font-weight: 800;
+    color: var(--color-lime-dark);
+    margin-bottom: 0.45rem;
+  }
+
+  .step h3 {
+    color: var(--color-forest);
+    margin-bottom: 0.4rem;
+  }
+
+  .step p {
+    margin: 0;
+    color: var(--color-muted);
+  }
+
+  @media (min-width: 800px) and (max-width: 1099px) {
+    .steps {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1100px) {
+    .steps {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+</style>

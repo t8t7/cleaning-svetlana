@@ -1,0 +1,40 @@
+services:
+  web:
+    build: .
+    container_name: svetlana-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      MASTER_TOKEN: ${MASTER_TOKEN:-change-me-master-token}
+    volumes:
+      - leads_data:/app/data
+    expose:
+      - "3000"
+    networks:
+      - svetlana_net
+
+  caddy:
+    image: caddy:2.9-alpine
+    container_name: svetlana-caddy
+    restart: unless-stopped
+    ports:
+      - "3080:80"
+      - "3443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    networks:
+      - svetlana_net
+
+volumes:
+  leads_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  svetlana_net:
+    driver: bridge

@@ -1,0 +1,26 @@
+{
+  "name": "svetlana-cleaning",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "assets": "node scripts/prepare-assets.mjs",
+    "build": "astro build",
+    "preview": "astro preview",
+    "start": "node server/index.js",
+    "prestart": "node -e \"import('node:fs').then(fs=>fs.mkdirSync('data',{recursive:true}))\"",
+    "docker:up": "docker compose up --build -d",
+    "docker:down": "docker compose down"
+  },
+  "dependencies": {
+    "astro": "^5.7.10",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "multer": "^2.5.0",
+    "sharp": "^0.35.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

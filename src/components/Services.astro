@@ -1,0 +1,96 @@
+---
+import { services } from '../data/site.js';
+---
+
+<section class="section" id="services">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">Услуги</span>
+      <h2>Уборка под вашу задачу — без лишней суеты</h2>
+      <p>Генеральная, после ремонта, поддерживающая и мойка окон. Средства и оборудование привозим с собой.</p>
+    </div>
+
+    <div class="services-grid" data-services-grid>
+      {services.map((service) => (
+        <article class="service reveal" data-service-id={service.id}>
+          <h3>{service.title}</h3>
+          <p>{service.description}</p>
+          <div class="meta">
+            <span data-service-price>{service.priceFrom}</span>
+            <span data-service-duration>{service.duration}</span>
+          </div>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
+
+<script>
+  const applyServiceCards = (payload) => {
+    if (!payload || !Array.isArray(payload.items)) return;
+    for (const item of payload.items) {
+      const card = document.querySelector(`[data-service-id="${item.id}"]`);
+      if (!card) continue;
+      const priceEl = card.querySelector('[data-service-price]');
+      const durationEl = card.querySelector('[data-service-duration]');
+      if (priceEl && item.priceLabel) priceEl.textContent = item.priceLabel;
+      if (durationEl && item.durationLabel) durationEl.textContent = item.durationLabel;
+    }
+  };
+
+  fetch('/api/services', { headers: { Accept: 'application/json' } })
+    .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+    .then(applyServiceCards)
+    .catch(() => {
+      /* keep SSR static fallback */
+    });
+</script>
+
+<style>
+  .services-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .service {
+    background: var(--color-white);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 1.35rem 1.25rem 1.2rem;
+    display: grid;
+    gap: 0.7rem;
+    min-width: 0;
+  }
+
+  .service h3 {
+    font-size: 1.2rem;
+    color: var(--color-forest);
+  }
+
+  .service p {
+    margin: 0;
+    color: var(--color-muted);
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem 1rem;
+    font-weight: 700;
+    color: var(--color-teal);
+    font-size: 0.95rem;
+  }
+
+  @media (min-width: 700px) {
+    .services-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1100px) {
+    .services-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+</style>

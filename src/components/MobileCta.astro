@@ -1,0 +1,46 @@
+---
+import { site } from '../data/site.js';
+---
+
+<div class="mobile-cta" role="region" aria-label="Быстрые действия">
+  <a class="btn btn-primary" href={`tel:${site.phoneTel}`}>Позвонить</a>
+</div>
+
+<style>
+  .mobile-cta {
+    display: none;
+  }
+
+  @media (max-width: 767px) {
+    .mobile-cta {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 60;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.55rem;
+      padding: 0.65rem clamp(0.75rem, 4vw, 1.25rem) calc(0.65rem + env(safe-area-inset-bottom));
+      background: rgba(248, 250, 249, 0.96);
+      border-top: 1px solid var(--color-border);
+      backdrop-filter: blur(10px);
+      animation: rise 0.5s var(--ease) both;
+      box-sizing: border-box;
+    }
+
+    .mobile-cta .btn {
+      width: 100%;
+      max-width: 100%;
+    }
+  }
+
+  @keyframes rise {
+    from {
+      transform: translateY(110%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+</style>

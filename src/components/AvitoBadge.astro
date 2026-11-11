@@ -1,0 +1,66 @@
+---
+import { site } from '../data/site.js';
+
+interface Props {
+  class?: string;
+}
+
+const { class: className = '' } = Astro.props;
+---
+
+<a
+  class={`avito-badge ${className}`.trim()}
+  href={site.avitoUrl}
+  target="_blank"
+  rel="noopener noreferrer"
+  aria-label="Смотреть объявление и отзывы на Авито"
+>
+  <img src="/images/badges/avito-logo.svg" alt="Авито" width="120" height="30" loading="lazy" />
+  <span class="avito-badge-text">
+    <strong>Мы на Авито</strong>
+    <small>Объявление и отзывы</small>
+  </span>
+</a>
+
+<style>
+  .avito-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.65rem 0.9rem;
+    border-radius: 14px;
+    border: 1px solid #d7e3ef;
+    background: #ffffff;
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+    transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
+    max-width: 100%;
+  }
+
+  .avito-badge:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+  }
+
+  .avito-badge img {
+    width: 96px;
+    height: auto;
+    flex-shrink: 0;
+  }
+
+  .avito-badge-text {
+    display: grid;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+
+  .avito-badge-text strong {
+    color: #1e293b;
+    font-size: 0.95rem;
+    line-height: 1.2;
+  }
+
+  .avito-badge-text small {
+    color: #64748b;
+    font-size: 0.78rem;
+  }
+</style>

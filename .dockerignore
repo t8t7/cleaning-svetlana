@@ -1,0 +1,13 @@
+node_modules
+dist
+data
+mobile
+.git
+.infa
+infa
+*.log
+.DS_Store
+.astro
+.env
+.env.*
+agent-transcripts
