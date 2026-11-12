@@ -97,12 +97,32 @@ const fallbackItems = [
   let currentIndex = 0;
   let touchStartX = 0;
   let touchDeltaX = 0;
+  const prefetchedUrls = new Set();
 
   const escapeAttr = (value) =>
     String(value || '')
       .replace(/&/g, '&amp;')
       .replace(/"/g, '&quot;')
       .replace(/</g, '&lt;');
+
+  const fullUrl = (item) => item?.url || item?.thumbUrl || '';
+
+  const prefetchUrl = (url) => {
+    if (!url || prefetchedUrls.has(url)) return;
+    prefetchedUrls.add(url);
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = url;
+  };
+
+  const prefetchAround = (index) => {
+    if (!items.length) return;
+    // Current + next two + previous: swipe feels instant on slow mobile nets.
+    for (const offset of [0, 1, 2, -1]) {
+      const target = (index + offset + items.length) % items.length;
+      prefetchUrl(fullUrl(items[target]));
+    }
+  };
 
   const cardHtml = (item, index) => {
     const thumb = item.thumbUrl || item.url;
@@ -120,12 +140,13 @@ const fallbackItems = [
     if (!items.length || !dialog || !dialogImg || !dialogCaption || !dialogCounter) return;
     currentIndex = (index + items.length) % items.length;
     const item = items[currentIndex];
-    const full = item.url || item.thumbUrl || '';
+    const full = fullUrl(item);
     dialogImg.setAttribute('src', full);
     dialogImg.setAttribute('alt', item.caption || '');
     dialogCaption.textContent = item.caption || '';
     dialogCounter.textContent = `${currentIndex + 1} / ${items.length}`;
     if (typeof dialog.showModal === 'function' && !dialog.open) dialog.showModal();
+    prefetchAround(currentIndex);
   };
 
   const bindGrid = () => {
@@ -155,6 +176,9 @@ const fallbackItems = [
         openAllBtn.hidden = true;
       }
     }
+
+    // Warm the first shots so "Смотреть все" opens without a blank pause.
+    if (items.length) prefetchAround(0);
   };
 
   openAllBtn?.addEventListener('click', () => showFrame(0));
