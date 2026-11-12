@@ -28,6 +28,17 @@ fi
 
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d --remove-orphans
 docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
-curl -fsS "http://127.0.0.1:3000/health"
-echo
-echo "Deploy finished."
+
+for i in $(seq 1 30); do
+  if curl -fsS "http://127.0.0.1:3000/health"; then
+    echo
+    echo "Deploy finished."
+    exit 0
+  fi
+  echo "health not ready yet ($i/30), waiting..."
+  sleep 2
+done
+
+echo "ERROR: /health did not become ready"
+docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=80 web
+exit 1
