@@ -1,6 +1,8 @@
 ---
 import { site } from '../data/site.js';
 
+const PREVIEW_LIMIT = 6;
+
 const fallbackItems = [
   {
     id: 'demo-kitchen',
@@ -23,21 +25,22 @@ const fallbackItems = [
 ];
 ---
 
-<section class="section clean-frames" id="frames" aria-labelledby="frames-title">
+<section class="section clean-frames" id="frames" aria-labelledby="frames-title" data-preview-limit={PREVIEW_LIMIT}>
   <div class="container">
     <div class="section-head reveal">
       <span class="eyebrow">Галерея</span>
       <h2 id="frames-title">Фото работ</h2>
-      <p>Реальный результат в квартирах — звоните и записывайтесь.</p>
+      <p>Реальный результат в квартирах — листайте галерею, без длинной ленты на странице.</p>
     </div>
 
     <div class="frames-grid" data-frames-grid>
-      {fallbackItems.map((item, index) => (
+      {fallbackItems.slice(0, PREVIEW_LIMIT).map((item, index) => (
         <article class="frame-card reveal" data-frame-id={item.id}>
           <button
             type="button"
             class="frame-media"
             data-open-frame
+            data-index={index}
             data-url={item.url}
             data-caption={item.caption}
           >
@@ -48,32 +51,52 @@ const fallbackItems = [
               height="540"
               loading={index < 2 ? 'eager' : 'lazy'}
               decoding="async"
-              sizes="(min-width: 1000px) 33vw, (min-width: 700px) 50vw, 100vw"
+              sizes="(min-width: 1000px) 33vw, (min-width: 700px) 50vw, 50vw"
             />
           </button>
         </article>
       ))}
     </div>
 
-    <div class="frames-cta reveal">
+    <div class="frames-actions reveal">
+      <button type="button" class="btn btn-ghost" data-open-all-frames hidden>
+        Смотреть все фото
+      </button>
       <a class="btn btn-primary" href={`tel:${site.phoneTel}`}>Позвонить и записаться</a>
     </div>
   </div>
 </section>
 
 <dialog class="frame-dialog" data-frame-dialog>
-  <form method="dialog" class="frame-dialog-inner">
-    <button class="frame-dialog-close" value="close" aria-label="Закрыть">×</button>
-    <img data-dialog-img alt="" decoding="async" />
-    <p data-dialog-caption></p>
-  </form>
+  <div class="frame-dialog-inner">
+    <button type="button" class="frame-dialog-close" data-close-frame aria-label="Закрыть">×</button>
+    <button type="button" class="frame-nav frame-nav-prev" data-frame-prev aria-label="Предыдущее фото">‹</button>
+    <button type="button" class="frame-nav frame-nav-next" data-frame-next aria-label="Следующее фото">›</button>
+    <img data-dialog-img alt="" decoding="async" draggable="false" />
+    <div class="frame-dialog-meta">
+      <p data-dialog-caption></p>
+      <p class="frame-dialog-counter" data-dialog-counter></p>
+    </div>
+  </div>
 </dialog>
 
 <script>
+  const section = document.querySelector('.clean-frames');
   const grid = document.querySelector('[data-frames-grid]');
+  const openAllBtn = document.querySelector('[data-open-all-frames]');
   const dialog = document.querySelector('[data-frame-dialog]');
   const dialogImg = document.querySelector('[data-dialog-img]');
   const dialogCaption = document.querySelector('[data-dialog-caption]');
+  const dialogCounter = document.querySelector('[data-dialog-counter]');
+  const closeBtn = document.querySelector('[data-close-frame]');
+  const prevBtn = document.querySelector('[data-frame-prev]');
+  const nextBtn = document.querySelector('[data-frame-next]');
+  const previewLimit = Number(section?.getAttribute('data-preview-limit') || 6);
+
+  let items = [];
+  let currentIndex = 0;
+  let touchStartX = 0;
+  let touchDeltaX = 0;
 
   const escapeAttr = (value) =>
     String(value || '')
@@ -87,31 +110,129 @@ const fallbackItems = [
     const loading = index < 2 ? 'eager' : 'lazy';
     return `
     <article class="frame-card reveal is-visible" data-frame-id="${escapeAttr(item.id)}">
-      <button type="button" class="frame-media" data-open-frame data-url="${escapeAttr(full)}" data-caption="${escapeAttr(item.caption)}">
-        <img src="${escapeAttr(thumb)}" alt="${escapeAttr(item.caption)}" width="720" height="540" loading="${loading}" decoding="async" sizes="(min-width: 1000px) 33vw, (min-width: 700px) 50vw, 100vw" />
+      <button type="button" class="frame-media" data-open-frame data-index="${index}" data-url="${escapeAttr(full)}" data-caption="${escapeAttr(item.caption)}">
+        <img src="${escapeAttr(thumb)}" alt="${escapeAttr(item.caption)}" width="720" height="540" loading="${loading}" decoding="async" sizes="(min-width: 1000px) 33vw, (min-width: 700px) 50vw, 50vw" />
       </button>
     </article>`;
   };
 
-  const bindCard = (card) => {
-    const openBtn = card.querySelector('[data-open-frame]');
-    openBtn?.addEventListener('click', () => {
-      if (!dialog || !dialogImg || !dialogCaption) return;
-      dialogImg.setAttribute('src', openBtn.getAttribute('data-url') || '');
-      dialogImg.setAttribute('alt', openBtn.getAttribute('data-caption') || '');
-      dialogCaption.textContent = openBtn.getAttribute('data-caption') || '';
-      dialog.showModal();
+  const showFrame = (index) => {
+    if (!items.length || !dialog || !dialogImg || !dialogCaption || !dialogCounter) return;
+    currentIndex = (index + items.length) % items.length;
+    const item = items[currentIndex];
+    const full = item.url || item.thumbUrl || '';
+    dialogImg.setAttribute('src', full);
+    dialogImg.setAttribute('alt', item.caption || '');
+    dialogCaption.textContent = item.caption || '';
+    dialogCounter.textContent = `${currentIndex + 1} / ${items.length}`;
+    if (typeof dialog.showModal === 'function' && !dialog.open) dialog.showModal();
+  };
+
+  const bindGrid = () => {
+    grid?.querySelectorAll('[data-open-frame]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const index = Number(btn.getAttribute('data-index') || 0);
+        showFrame(index);
+      });
     });
   };
 
-  document.querySelectorAll('[data-frame-id]').forEach(bindCard);
+  const renderPreview = (list) => {
+    items = Array.isArray(list) ? list : [];
+    if (!grid) return;
+    const preview = items.slice(0, previewLimit);
+    grid.innerHTML = preview.map((item, index) => cardHtml(item, index)).join('');
+    bindGrid();
+
+    if (openAllBtn) {
+      if (items.length > previewLimit) {
+        openAllBtn.hidden = false;
+        openAllBtn.textContent = `Смотреть все фото (${items.length})`;
+      } else if (items.length > 1) {
+        openAllBtn.hidden = false;
+        openAllBtn.textContent = `Смотреть фото (${items.length})`;
+      } else {
+        openAllBtn.hidden = true;
+      }
+    }
+  };
+
+  openAllBtn?.addEventListener('click', () => showFrame(0));
+  closeBtn?.addEventListener('click', () => dialog?.close());
+  prevBtn?.addEventListener('click', () => showFrame(currentIndex - 1));
+  nextBtn?.addEventListener('click', () => showFrame(currentIndex + 1));
+
+  dialog?.addEventListener('click', (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+
+  dialog?.addEventListener('keydown', (event) => {
+    if (!dialog.open) return;
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      showFrame(currentIndex - 1);
+    }
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      showFrame(currentIndex + 1);
+    }
+  });
+
+  dialogImg?.addEventListener(
+    'touchstart',
+    (event) => {
+      touchStartX = event.changedTouches[0]?.clientX || 0;
+      touchDeltaX = 0;
+    },
+    { passive: true }
+  );
+
+  dialogImg?.addEventListener(
+    'touchmove',
+    (event) => {
+      touchDeltaX = (event.changedTouches[0]?.clientX || 0) - touchStartX;
+    },
+    { passive: true }
+  );
+
+  dialogImg?.addEventListener(
+    'touchend',
+    () => {
+      if (Math.abs(touchDeltaX) < 40) return;
+      if (touchDeltaX < 0) showFrame(currentIndex + 1);
+      else showFrame(currentIndex - 1);
+    },
+    { passive: true }
+  );
+
+  const demoItems = [
+    {
+      id: 'demo-kitchen',
+      url: '/images/works/result-kitchen-detail.jpg',
+      thumbUrl: '/images/works/result-kitchen-detail.jpg',
+      caption: 'Кухня после генеральной уборки',
+    },
+    {
+      id: 'demo-after-kitchen',
+      url: '/images/works/after-kitchen.jpg',
+      thumbUrl: '/images/works/after-kitchen.jpg',
+      caption: 'Чистая кухня — готово к жизни',
+    },
+    {
+      id: 'demo-window',
+      url: '/images/works/after-window.jpg',
+      thumbUrl: '/images/works/after-window.jpg',
+      caption: 'Окна без разводов',
+    },
+  ];
+
+  renderPreview(demoItems);
 
   fetch('/api/works', { headers: { Accept: 'application/json' } })
     .then((res) => (res.ok ? res.json() : Promise.reject()))
     .then((data) => {
-      if (!grid || !Array.isArray(data.items) || !data.items.length) return;
-      grid.innerHTML = data.items.map((item, index) => cardHtml(item, index)).join('');
-      grid.querySelectorAll('[data-frame-id]').forEach(bindCard);
+      if (!Array.isArray(data.items) || !data.items.length) return;
+      renderPreview(data.items);
     })
     .catch(() => {
       /* keep demo fallback */
@@ -121,11 +242,10 @@ const fallbackItems = [
 <style>
   .frames-grid {
     display: grid;
-    gap: 1rem;
-    grid-template-columns: 1fr;
+    gap: 0.75rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  /* :global — карточки пересобираются из /api/works */
   .clean-frames :global(.frame-card) {
     background: #fff;
     border: 1px solid var(--color-border);
@@ -156,17 +276,20 @@ const fallbackItems = [
     background: #ecfdf5;
   }
 
-  .frames-cta {
-    margin-top: 1.5rem;
+  .frames-actions {
+    margin-top: 1.25rem;
     display: flex;
+    flex-wrap: wrap;
     justify-content: center;
+    gap: 0.75rem;
   }
 
   .frame-dialog {
     border: 0;
     padding: 0;
     border-radius: 18px;
-    max-width: min(920px, calc(100% - 2rem));
+    width: min(920px, calc(100% - 1.25rem));
+    max-width: min(920px, calc(100% - 1.25rem));
     background: #041f1c;
     color: #fff;
   }
@@ -182,40 +305,73 @@ const fallbackItems = [
 
   .frame-dialog-inner img {
     width: 100%;
-    max-height: 75vh;
+    max-height: 72vh;
     object-fit: contain;
     display: block;
     background: #000;
+    touch-action: pan-y;
+    user-select: none;
   }
 
-  .frame-dialog-inner p {
-    margin: 0;
+  .frame-dialog-meta {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
     padding: 0.85rem 1rem 1rem;
   }
 
-  .frame-dialog-close {
+  .frame-dialog-meta p {
+    margin: 0;
+  }
+
+  .frame-dialog-counter {
+    flex: 0 0 auto;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #99f6e4;
+  }
+
+  .frame-dialog-close,
+  .frame-nav {
     position: absolute;
-    top: 0.55rem;
-    right: 0.55rem;
-    width: 2.2rem;
-    height: 2.2rem;
+    z-index: 2;
     border: 0;
     border-radius: 999px;
     background: rgba(0, 0, 0, 0.55);
     color: #fff;
-    font-size: 1.4rem;
     cursor: pointer;
+  }
+
+  .frame-dialog-close {
+    top: 0.55rem;
+    right: 0.55rem;
+    width: 2.2rem;
+    height: 2.2rem;
+    font-size: 1.4rem;
+  }
+
+  .frame-nav {
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2.4rem;
+    height: 2.4rem;
+    font-size: 1.6rem;
+    line-height: 1;
+  }
+
+  .frame-nav-prev {
+    left: 0.45rem;
+  }
+
+  .frame-nav-next {
+    right: 0.45rem;
   }
 
   @media (min-width: 700px) {
     .frames-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  @media (min-width: 1000px) {
-    .frames-grid {
       grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1rem;
     }
   }
 </style>
