@@ -59,12 +59,27 @@ import { reviews, site } from '../data/site.js';
 
   if (track && slides.length) {
     const update = () => {
-      const slideWidth = slides[0].getBoundingClientRect().width || 1;
-      const gap = Number.parseFloat(getComputedStyle(track).columnGap || getComputedStyle(track).gap || '0') || 0;
-      const index = Math.round(track.scrollLeft / (slideWidth + gap));
-      const safeIndex = Math.max(0, Math.min(slides.length - 1, index));
-      if (counter) counter.textContent = `${safeIndex + 1} / ${slides.length}`;
-      dots.forEach((dot, i) => dot.classList.toggle('is-active', i === safeIndex));
+      // Desktop uses a static grid — no carousel chrome to sync.
+      if (track.scrollWidth <= track.clientWidth + 1) return;
+
+      const trackLeft = track.getBoundingClientRect().left;
+      let bestIndex = 0;
+      let bestDist = Infinity;
+      slides.forEach((slide, i) => {
+        const dist = Math.abs(slide.getBoundingClientRect().left - trackLeft);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIndex = i;
+        }
+      });
+
+      const maxScroll = track.scrollWidth - track.clientWidth;
+      if (maxScroll > 0 && track.scrollLeft >= maxScroll - 2) {
+        bestIndex = slides.length - 1;
+      }
+
+      if (counter) counter.textContent = `${bestIndex + 1} / ${slides.length}`;
+      dots.forEach((dot, i) => dot.classList.toggle('is-active', i === bestIndex));
     };
 
     track.addEventListener('scroll', () => window.requestAnimationFrame(update), { passive: true });
@@ -208,13 +223,27 @@ import { reviews, site } from '../data/site.js';
 
   @media (min-width: 800px) {
     .review-track {
-      grid-auto-columns: minmax(18rem, calc((100% - 1.7rem) / 2));
+      grid-auto-flow: row;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-auto-columns: unset;
+      overflow: visible;
+      scroll-snap-type: none;
+      padding: 0;
+    }
+
+    .review {
+      scroll-snap-align: unset;
+      min-height: 0;
+    }
+
+    .review-controls {
+      display: none;
     }
   }
 
   @media (min-width: 1100px) {
     .review-track {
-      grid-auto-columns: minmax(16rem, calc((100% - 2.55rem) / 3));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
 </style>
