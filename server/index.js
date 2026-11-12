@@ -218,20 +218,80 @@ async function cleanupTemp(file) {
   }
 }
 
+const availabilityStreamClients = new Set();
+
+function sendAvailabilityEvent(res, event, payload) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function broadcastAvailability(payload) {
+  for (const client of availabilityStreamClients) {
+    try {
+      sendAvailabilityEvent(client, 'availability', payload);
+    } catch {
+      availabilityStreamClients.delete(client);
+      try {
+        client.end();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+async function loadAvailabilityPayload() {
+  const data = await readAvailability(availabilityFile);
+  const live = getLiveStatus(data.weekPlan);
+  return { ...data, live };
+}
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
 app.get('/api/availability', async (_req, res) => {
   try {
-    const data = await readAvailability(availabilityFile);
-    const live = getLiveStatus(data.weekPlan);
+    const payload = await loadAvailabilityPayload();
     res.set('Cache-Control', 'no-store');
-    return res.json({ ...data, live });
+    return res.json(payload);
   } catch (error) {
     console.error('availability_read_error', error);
     return res.status(500).json({ error: 'Не удалось прочитать расписание' });
   }
+});
+
+app.get('/api/availability/stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  availabilityStreamClients.add(res);
+  sendAvailabilityEvent(res, 'connected', { ok: true });
+
+  try {
+    const payload = await loadAvailabilityPayload();
+    sendAvailabilityEvent(res, 'availability', payload);
+  } catch (error) {
+    console.error('availability_stream_seed_error', error);
+  }
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      clearInterval(heartbeat);
+    }
+  }, 25000);
+
+  const cleanup = () => {
+    clearInterval(heartbeat);
+    availabilityStreamClients.delete(res);
+  };
+  req.on('close', cleanup);
+  req.on('error', cleanup);
 });
 
 app.put('/api/availability', availabilityWriteLimiter, async (req, res) => {
@@ -245,8 +305,10 @@ app.put('/api/availability', availabilityWriteLimiter, async (req, res) => {
 
     await writeAvailabilityAtomic(availabilityFile, checked.data);
     const live = getLiveStatus(checked.data.weekPlan);
+    const payload = { ...checked.data, live };
+    broadcastAvailability(payload);
     res.set('Cache-Control', 'no-store');
-    return res.json({ ok: true, ...checked.data, live });
+    return res.json({ ok: true, ...payload });
   } catch (error) {
     console.error('availability_write_error', error);
     return res.status(500).json({ error: 'Не удалось сохранить расписание' });

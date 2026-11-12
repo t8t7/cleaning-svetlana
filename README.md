@@ -42,6 +42,7 @@ docker compose down
 - `GET /health` — статус сервиса
 - `POST /api/lead` — заявка `{ name, phone, service?, comment? }` → запись в `data/leads.jsonl`
 - `GET /api/availability` — публичное расписание (для сайта)
+- `GET /api/availability/stream` — мгновенные обновления расписания для открытых вкладок (SSE)
 - `PUT /api/availability` — обновление с телефона (`Authorization: Bearer <MASTER_TOKEN>`)
 - `GET /api/prices` — публичный прайс (для сайта)
 - `PUT /api/prices` — полное обновление прайса с телефона (`Authorization: Bearer <MASTER_TOKEN>`)

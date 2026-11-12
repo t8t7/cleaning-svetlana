@@ -1,4 +1,13 @@
 :80 {
-	encode gzip zstd
-	reverse_proxy web:3000
+	@availabilityStream path /api/availability/stream
+	handle @availabilityStream {
+		reverse_proxy web:3000 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		encode gzip zstd
+		reverse_proxy web:3000
+	}
 }

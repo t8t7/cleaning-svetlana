@@ -230,7 +230,7 @@ const initialDayKey = live.today.key;
     });
   };
 
-  const applyAvailability = (data) => {
+  const applyAvailability = (data, { preserveSelection = false } = {}) => {
     const plan = withBusinessWeekDates(Array.isArray(data.weekPlan) ? data.weekPlan : []);
     if (!plan.length || !weekStrip) return;
 
@@ -243,7 +243,10 @@ const initialDayKey = live.today.key;
     if (liveDetail) liveDetail.textContent = live.detail || '';
     if (liveKicker && data.meta?.note) liveKicker.textContent = data.meta.note;
 
-    const selectedKey = live.today?.key || todayKey();
+    const keptKey = preserveSelection
+      ? weekStrip.querySelector('[aria-selected="true"]')?.getAttribute('data-day-key')
+      : null;
+    const selectedKey = keptKey || live.today?.key || todayKey();
     weekStrip.innerHTML = plan
       .map((day) => {
         const selected = day.key === selectedKey;
@@ -264,17 +267,87 @@ const initialDayKey = live.today.key;
     if (active) selectDay(active);
   };
 
+  let hasLoadedAvailability = false;
+  let fallbackTimer = null;
+  let eventSource = null;
+
+  const loadAvailability = ({ preserveSelection = false } = {}) =>
+    fetch('/api/availability', { headers: { Accept: 'application/json' }, cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then((data) => {
+        applyAvailability(data, { preserveSelection: preserveSelection && hasLoadedAvailability });
+        hasLoadedAvailability = true;
+      });
+
+  const stopFallbackPolling = () => {
+    if (fallbackTimer == null) return;
+    window.clearInterval(fallbackTimer);
+    fallbackTimer = null;
+  };
+
+  const startFallbackPolling = () => {
+    if (fallbackTimer != null) return;
+    fallbackTimer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      loadAvailability({ preserveSelection: true }).catch(() => {});
+    }, 3000);
+  };
+
+  const connectAvailabilityStream = () => {
+    if (!window.EventSource) {
+      startFallbackPolling();
+      return;
+    }
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+
+    eventSource = new EventSource('/api/availability/stream');
+    eventSource.addEventListener('availability', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        applyAvailability(data, { preserveSelection: hasLoadedAvailability });
+        hasLoadedAvailability = true;
+        stopFallbackPolling();
+      } catch {
+        /* ignore bad payloads */
+      }
+    });
+    eventSource.onerror = () => {
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      startFallbackPolling();
+      window.setTimeout(() => {
+        if (document.visibilityState === 'visible') connectAvailabilityStream();
+      }, 2000);
+    };
+  };
+
   bindChips();
   refreshSsrDates();
   selectTodayChip();
 
-  fetch('/api/availability', { headers: { Accept: 'application/json' }, cache: 'no-store' })
-    .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
-    .then(applyAvailability)
+  loadAvailability()
     .catch(() => {
       refreshSsrDates();
       selectTodayChip();
+    })
+    .finally(() => {
+      connectAvailabilityStream();
     });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      loadAvailability({ preserveSelection: true }).catch(() => {});
+      connectAvailabilityStream();
+    } else if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+  });
 </script>
 
 <style>
