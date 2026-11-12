@@ -61,6 +61,12 @@ docker compose down
 
 Папка [`mobile/`](mobile/) — Expo APK для мастера. Инструкция сборки: [`mobile/README.md`](mobile/README.md).
 
+Скрытая раздача APK с сайта (для тестов, без USB):
+
+- Страница: `/app-download` (не в меню, `noindex`)
+- PIN: `APK_DOWNLOAD_PIN` в `.env`
+- Файл на сервере: `releases/svetlana-schedule.apk` (том Docker `./releases` → `/app/releases`)
+
 ## Контент и SEO
 
 - Телефон-заглушка: `+7 (000) 000-00-00`

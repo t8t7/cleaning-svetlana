@@ -1,11 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AppSettings } from './types';
 
-const KEY = 'svetlana.schedule.settings.v1';
+const KEY = 'svetlana.schedule.settings.v3';
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  serverUrl: 'http://192.168.1.10:3080',
-  masterToken: '',
+  serverUrl: 'https://test-fas.ru',
+  masterToken: 'ff0f4d90ce67c5ac0759d9287d3aaed72243aaa9cebf3e9b',
 };
 
 export async function loadSettings(): Promise<AppSettings> {

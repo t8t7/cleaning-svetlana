@@ -426,7 +426,7 @@ export default function App() {
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.sectionLabel}>Адрес сайта / API</Text>
           <Text style={styles.hint}>
-            Пример: http://192.168.0.15:3080 (ПК и телефон в одной Wi‑Fi)
+            Боевой сервер: https://test-fas.ru (для локальной отладки — http://IP_ПК:3080)
           </Text>
           <TextInput
             style={styles.input}
@@ -434,11 +434,11 @@ export default function App() {
             autoCorrect={false}
             value={draftSettings.serverUrl}
             onChangeText={(serverUrl) => setDraftSettings((s) => ({ ...s, serverUrl }))}
-            placeholder="http://192.168.x.x:3080"
+            placeholder="https://test-fas.ru"
           />
 
           <Text style={styles.sectionLabel}>Токен мастера</Text>
-          <Text style={styles.hint}>Тот же MASTER_TOKEN, что в .env / docker-compose</Text>
+          <Text style={styles.hint}>Тот же MASTER_TOKEN, что в .env на VPS</Text>
           <TextInput
             style={styles.input}
             autoCapitalize="none"
@@ -446,7 +446,7 @@ export default function App() {
             secureTextEntry
             value={draftSettings.masterToken}
             onChangeText={(masterToken) => setDraftSettings((s) => ({ ...s, masterToken }))}
-            placeholder="change-me-master-token"
+            placeholder="MASTER_TOKEN с сервера"
           />
 
           <View style={styles.actions}>

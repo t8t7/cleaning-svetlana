@@ -1,6 +1,7 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import multer from 'multer';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -42,12 +43,16 @@ const pricesFile = path.join(dataDir, 'prices.json');
 const serviceCardsFile = path.join(dataDir, 'service-cards.json');
 const worksFile = path.join(dataDir, 'works.json');
 const uploadsRoot = path.join(dataDir, 'uploads');
+const releasesDir = path.join(root, 'releases');
+const apkFile = path.join(releasesDir, 'svetlana-schedule.apk');
 const port = Number(process.env.PORT || 3000);
 const masterToken = String(process.env.MASTER_TOKEN || '').trim();
+const apkDownloadPin = String(process.env.APK_DOWNLOAD_PIN || '').trim();
 
 const app = express();
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '32kb' }));
+app.use(express.urlencoded({ extended: false, limit: '4kb' }));
 
 const leadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -89,6 +94,14 @@ const rateLimiter = rateLimit({
   message: { error: 'Слишком много оценок. Попробуйте позже.' },
 });
 
+const apkDownloadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Слишком много попыток. Попробуйте позже.',
+});
+
 const upload = multer({
   dest: path.join(os.tmpdir(), 'svetlana-uploads'),
   limits: { fileSize: 4 * 1024 * 1024, files: 1 },
@@ -127,6 +140,73 @@ function requireMasterToken(req, res) {
     return false;
   }
   return true;
+}
+
+function pinsMatch(provided, expected) {
+  const a = Buffer.from(String(provided || ''), 'utf8');
+  const b = Buffer.from(String(expected || ''), 'utf8');
+  if (a.length === 0 || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderApkDownloadPage({ error = '', disabled = false } = {}) {
+  const errorHtml = error
+    ? `<p class="error">${escapeHtml(error)}</p>`
+    : '';
+  const formHtml = disabled
+    ? ''
+    : `<form method="post" action="/app-download">
+        <label for="pin">PIN</label>
+        <input id="pin" name="pin" type="password" inputmode="numeric" autocomplete="one-time-code" required autofocus />
+        <button type="submit">Скачать APK</button>
+      </form>`;
+
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Скачать приложение</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f0fdfa; color: #134e4a; }
+    main { width: min(100% - 2rem, 22rem); background: #fff; border: 1px solid #99f6e4; border-radius: 12px; padding: 1.25rem; }
+    h1 { font-size: 1.15rem; margin: 0 0 0.5rem; }
+    p { margin: 0 0 1rem; line-height: 1.4; font-size: 0.95rem; }
+    label { display: block; font-size: 0.85rem; margin-bottom: 0.35rem; }
+    input { width: 100%; box-sizing: border-box; padding: 0.7rem 0.75rem; border: 1px solid #5eead4; border-radius: 8px; font-size: 1rem; }
+    button { margin-top: 0.85rem; width: 100%; border: 0; border-radius: 8px; padding: 0.75rem; background: #0f766e; color: #fff; font-size: 1rem; cursor: pointer; }
+    .error { color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Приложение мастера</h1>
+    <p>Введите PIN, чтобы скачать APK для Android.</p>
+    ${errorHtml}
+    ${formHtml}
+  </main>
+</body>
+</html>`;
+}
+
+async function apkFileReady() {
+  try {
+    const stat = await fs.stat(apkFile);
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
+  }
 }
 
 async function cleanupTemp(file) {
@@ -333,6 +413,50 @@ app.post('/api/lead', leadLimiter, async (req, res) => {
   }
 });
 
+app.get('/app-download', (_req, res) => {
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  res.set('Cache-Control', 'no-store');
+  if (!apkDownloadPin) {
+    return res
+      .status(503)
+      .type('html')
+      .send(renderApkDownloadPage({ error: 'Скачивание временно недоступно (PIN не настроен).', disabled: true }));
+  }
+  return res.type('html').send(renderApkDownloadPage());
+});
+
+app.post('/app-download', apkDownloadLimiter, async (req, res) => {
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  res.set('Cache-Control', 'no-store');
+
+  if (!apkDownloadPin) {
+    return res
+      .status(503)
+      .type('html')
+      .send(renderApkDownloadPage({ error: 'Скачивание временно недоступно (PIN не настроен).', disabled: true }));
+  }
+
+  const pin = sanitize(req.body?.pin, 64);
+  if (!pinsMatch(pin, apkDownloadPin)) {
+    return res.status(401).type('html').send(renderApkDownloadPage({ error: 'Неверный PIN' }));
+  }
+
+  if (!(await apkFileReady())) {
+    return res
+      .status(404)
+      .type('html')
+      .send(renderApkDownloadPage({ error: 'APK ещё не загружен на сервер.' }));
+  }
+
+  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+  return res.download(apkFile, 'svetlana-schedule.apk', (err) => {
+    if (err && !res.headersSent) {
+      console.error('apk_download_error', err);
+      res.status(500).type('html').send(renderApkDownloadPage({ error: 'Не удалось отдать APK.' }));
+    }
+  });
+});
+
 app.use(
   '/uploads',
   express.static(uploadsRoot, {
@@ -365,5 +489,8 @@ app.listen(port, () => {
   console.log(`Svetlana cleaning server listening on http://localhost:${port}`);
   if (!masterToken) {
     console.warn('MASTER_TOKEN is not set — protected write routes will return 503');
+  }
+  if (!apkDownloadPin) {
+    console.warn('APK_DOWNLOAD_PIN is not set — /app-download will return 503');
   }
 });

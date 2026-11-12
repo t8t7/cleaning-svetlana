@@ -15,9 +15,11 @@ data/*.json
 data/uploads/
 !data/.gitkeep
 
-# local QA dumps
+# local QA dumps / binary releases (APK served from disk, not git)
 releases/qa-*.png
 releases/qa-v-*.png
 releases/qa-key-*.png
 releases/qa-final-*.png
 releases/qa-eval-*.png
+releases/*.apk
+!releases/.gitkeep

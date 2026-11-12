@@ -2,7 +2,7 @@
   "expo": {
     "name": "Светлана Расписание",
     "slug": "svetlana-schedule",
-    "version": "1.0.1",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -20,7 +20,7 @@
     },
     "android": {
       "package": "ru.svetlana.cleaning.schedule",
-      "versionCode": 3,
+      "versionCode": 5,
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#0f766e",

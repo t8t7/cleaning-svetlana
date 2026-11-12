@@ -7,8 +7,10 @@ services:
       NODE_ENV: production
       PORT: 3000
       MASTER_TOKEN: ${MASTER_TOKEN:-change-me-master-token}
+      APK_DOWNLOAD_PIN: ${APK_DOWNLOAD_PIN:-}
     volumes:
       - leads_data:/app/data
+      - ./releases:/app/releases:ro
     expose:
       - "3000"
     networks:
