@@ -13,6 +13,37 @@ const DAY_LABELS = {
 };
 const WORK_START = 8;
 const WORK_END = 20;
+const BUSINESS_TZ = 'Europe/Moscow';
+const WEEKDAY_INDEX = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+
+/** Calendar day/hour in Yoshkar-Ola (Europe/Moscow), not server UTC. */
+export function getBusinessNow(now = new Date()) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: BUSINESS_TZ,
+      weekday: 'short',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(now)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value])
+  );
+  const hourRaw = Number(parts.hour);
+  const hour = hourRaw === 24 ? 0 : hourRaw;
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    dayIndex: WEEKDAY_INDEX[parts.weekday] ?? 0,
+    hour: hour + Number(parts.minute) / 60,
+    shortDate: `${parts.day}.${parts.month}`,
+  };
+}
 
 export const DEFAULT_AVAILABILITY = {
   meta: {
@@ -34,26 +65,26 @@ export const DEFAULT_AVAILABILITY = {
   ],
 };
 
-function formatShortDate(date) {
-  const d = String(date.getDate()).padStart(2, '0');
-  const m = String(date.getMonth() + 1).padStart(2, '0');
+function formatShortDateFromUtcNoon(date) {
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
   return `${d}.${m}`;
 }
 
-/** Align week shortDate labels to the current calendar week (Mon–Sun). */
+/** Align week shortDate labels to the current calendar week in Europe/Moscow (Mon–Sun). */
 export function withCurrentWeekDates(plan, now = new Date()) {
-  const dayIndex = (now.getDay() + 6) % 7;
-  const monday = new Date(now);
-  monday.setHours(12, 0, 0, 0);
-  monday.setDate(now.getDate() - dayIndex);
+  const business = getBusinessNow(now);
+  const todayNoonUtc = new Date(Date.UTC(business.year, business.month - 1, business.day, 12, 0, 0));
+  const monday = new Date(todayNoonUtc);
+  monday.setUTCDate(todayNoonUtc.getUTCDate() - business.dayIndex);
 
   return plan.map((day, i) => {
     const date = new Date(monday);
-    date.setDate(monday.getDate() + i);
+    date.setUTCDate(monday.getUTCDate() + i);
     return {
       ...day,
       label: DAY_LABELS[day.key] || day.label,
-      shortDate: formatShortDate(date),
+      shortDate: formatShortDateFromUtcNoon(date),
     };
   });
 }
@@ -203,9 +234,9 @@ export async function writeAvailabilityAtomic(filePath, data) {
 }
 
 export function getLiveStatus(plan, now = new Date()) {
-  const dayIndex = (now.getDay() + 6) % 7;
-  const today = plan[dayIndex] || plan[0];
-  const hour = now.getHours() + now.getMinutes() / 60;
+  const business = getBusinessNow(now);
+  const today = plan[business.dayIndex] || plan[0];
+  const hour = business.hour;
 
   const formatHour = (h) => {
     const hours = Math.floor(h);

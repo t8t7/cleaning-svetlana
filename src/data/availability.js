@@ -8,11 +8,23 @@ export const availabilityMeta = {
   note: 'Расписание обновляется с телефона мастера',
 };
 
+const BUSINESS_TZ = 'Europe/Moscow';
+const WEEKDAY_INDEX = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+const DAY_LABELS = {
+  mon: 'Пн',
+  tue: 'Вт',
+  wed: 'Ср',
+  thu: 'Чт',
+  fri: 'Пт',
+  sat: 'Сб',
+  sun: 'Вс',
+};
+
 /**
  * status: free | busy | partial
  * busyRanges: [{ from: 10, to: 14 }] in hours (24h)
  */
-export const weekPlan = [
+export const weekPlanBase = [
   { key: 'mon', label: 'Пн', shortDate: '10.11', status: 'partial', busyRanges: [{ from: 9, to: 13 }] },
   { key: 'tue', label: 'Вт', shortDate: '11.11', status: 'busy', busyRanges: [{ from: 8, to: 20 }] },
   { key: 'wed', label: 'Ср', shortDate: '12.11', status: 'free', busyRanges: [] },
@@ -22,10 +34,60 @@ export const weekPlan = [
   { key: 'sun', label: 'Вс', shortDate: '16.11', status: 'busy', busyRanges: [{ from: 8, to: 20 }] },
 ];
 
+export function getBusinessNow(now = new Date()) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: BUSINESS_TZ,
+      weekday: 'short',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(now)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value])
+  );
+  const hourRaw = Number(parts.hour);
+  const hour = hourRaw === 24 ? 0 : hourRaw;
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    dayIndex: WEEKDAY_INDEX[parts.weekday] ?? 0,
+    hour: hour + Number(parts.minute) / 60,
+    shortDate: `${parts.day}.${parts.month}`,
+  };
+}
+
+export function withCurrentWeekDates(plan, now = new Date()) {
+  const business = getBusinessNow(now);
+  const todayNoonUtc = new Date(Date.UTC(business.year, business.month - 1, business.day, 12, 0, 0));
+  const monday = new Date(todayNoonUtc);
+  monday.setUTCDate(todayNoonUtc.getUTCDate() - business.dayIndex);
+
+  return plan.map((day, i) => {
+    const date = new Date(monday);
+    date.setUTCDate(monday.getUTCDate() + i);
+    const d = String(date.getUTCDate()).padStart(2, '0');
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+    return {
+      ...day,
+      label: DAY_LABELS[day.key] || day.label,
+      shortDate: `${d}.${m}`,
+    };
+  });
+}
+
+/** Current-week plan for SSR/demo (dates follow Europe/Moscow). */
+export const weekPlan = withCurrentWeekDates(weekPlanBase);
+
 export function getLiveStatus(plan = weekPlan, now = new Date()) {
-  const dayIndex = (now.getDay() + 6) % 7; // Mon=0
-  const today = plan[dayIndex] || plan[0];
-  const hour = now.getHours() + now.getMinutes() / 60;
+  const business = getBusinessNow(now);
+  const today = plan[business.dayIndex] || plan[0];
+  const hour = business.hour;
 
   if (today.status === 'free') {
     return {

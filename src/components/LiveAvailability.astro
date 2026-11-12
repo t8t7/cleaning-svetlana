@@ -89,6 +89,9 @@ const initialDayKey = live.today.key;
 <script>
   const startHour = 8;
   const endHour = 20;
+  const BUSINESS_TZ = 'Europe/Moscow';
+  const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  const WEEKDAY_INDEX = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
 
   const formatHour = (h) => `${String(Math.floor(h)).padStart(2, '0')}:00`;
   const escapeHtml = (value) =>
@@ -128,6 +131,36 @@ const initialDayKey = live.today.key;
     partial: 'Есть свободные окна между заказами',
   };
 
+  const getBusinessNow = (now = new Date()) => {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat('en-GB', {
+        timeZone: BUSINESS_TZ,
+        weekday: 'short',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+      })
+        .formatToParts(now)
+        .filter((part) => part.type !== 'literal')
+        .map((part) => [part.type, part.value])
+    );
+    const hourRaw = Number(parts.hour);
+    const hour = hourRaw === 24 ? 0 : hourRaw;
+    return {
+      year: Number(parts.year),
+      month: Number(parts.month),
+      day: Number(parts.day),
+      dayIndex: WEEKDAY_INDEX[parts.weekday] ?? 0,
+      hour: hour + Number(parts.minute) / 60,
+      shortDate: `${parts.day}.${parts.month}`,
+    };
+  };
+
+  const todayKey = () => DAY_KEYS[getBusinessNow().dayIndex] || 'mon';
+
   const buildSlotsHtml = (busyRanges) => {
     let html = '';
     for (let h = startHour; h < endHour; h += 1) {
@@ -157,26 +190,33 @@ const initialDayKey = live.today.key;
     });
   };
 
-  const withLocalWeekDates = (plan) => {
-    const now = new Date();
-    const dayIndex = (now.getDay() + 6) % 7;
-    const monday = new Date(now);
-    monday.setHours(12, 0, 0, 0);
-    monday.setDate(now.getDate() - dayIndex);
+  const withBusinessWeekDates = (plan) => {
+    const business = getBusinessNow();
+    const todayNoonUtc = new Date(Date.UTC(business.year, business.month - 1, business.day, 12, 0, 0));
+    const monday = new Date(todayNoonUtc);
+    monday.setUTCDate(todayNoonUtc.getUTCDate() - business.dayIndex);
     return plan.map((day, i) => {
       const date = new Date(monday);
-      date.setDate(monday.getDate() + i);
-      const d = String(date.getDate()).padStart(2, '0');
-      const m = String(date.getMonth() + 1).padStart(2, '0');
+      date.setUTCDate(monday.getUTCDate() + i);
+      const d = String(date.getUTCDate()).padStart(2, '0');
+      const m = String(date.getUTCMonth() + 1).padStart(2, '0');
       return { ...day, shortDate: `${d}.${m}` };
     });
+  };
+
+  const selectTodayChip = () => {
+    if (!weekStrip) return;
+    const chip =
+      weekStrip.querySelector(`[data-day-key="${todayKey()}"]`) ||
+      weekStrip.querySelector('[data-day-key]');
+    if (chip) selectDay(chip);
   };
 
   const refreshSsrDates = () => {
     if (!weekStrip) return;
     const chips = [...weekStrip.querySelectorAll('[data-day-key]')];
     if (!chips.length) return;
-    const dated = withLocalWeekDates(
+    const dated = withBusinessWeekDates(
       chips.map((chip) => ({
         key: chip.getAttribute('data-day-key'),
         shortDate: '',
@@ -191,7 +231,7 @@ const initialDayKey = live.today.key;
   };
 
   const applyAvailability = (data) => {
-    const plan = withLocalWeekDates(Array.isArray(data.weekPlan) ? data.weekPlan : []);
+    const plan = withBusinessWeekDates(Array.isArray(data.weekPlan) ? data.weekPlan : []);
     if (!plan.length || !weekStrip) return;
 
     const live = data.live || {};
@@ -203,7 +243,7 @@ const initialDayKey = live.today.key;
     if (liveDetail) liveDetail.textContent = live.detail || '';
     if (liveKicker && data.meta?.note) liveKicker.textContent = data.meta.note;
 
-    const selectedKey = live.today?.key || plan[((new Date().getDay() + 6) % 7)]?.key;
+    const selectedKey = live.today?.key || todayKey();
     weekStrip.innerHTML = plan
       .map((day) => {
         const selected = day.key === selectedKey;
@@ -226,12 +266,14 @@ const initialDayKey = live.today.key;
 
   bindChips();
   refreshSsrDates();
+  selectTodayChip();
 
-  fetch('/api/availability', { headers: { Accept: 'application/json' } })
+  fetch('/api/availability', { headers: { Accept: 'application/json' }, cache: 'no-store' })
     .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
     .then(applyAvailability)
     .catch(() => {
       refreshSsrDates();
+      selectTodayChip();
     });
 </script>
 
