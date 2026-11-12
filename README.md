@@ -44,6 +44,8 @@ docker compose down
 - `GET /api/availability` — публичное расписание (для сайта)
 - `GET /api/availability/stream` — мгновенные обновления расписания для открытых вкладок (SSE)
 - `PUT /api/availability` — обновление с телефона (`Authorization: Bearer <MASTER_TOKEN>`)
+- `GET /api/app-version` — актуальная версия Android APK (`releases/app-version.json`)
+- `GET /api/app-apk` — скачать APK для обновления из приложения (`Authorization: Bearer <MASTER_TOKEN>`)
 - `GET /api/prices` — публичный прайс (для сайта)
 - `PUT /api/prices` — полное обновление прайса с телефона (`Authorization: Bearer <MASTER_TOKEN>`)
   - позиция: `{ id, name, price, priceFrom, unit: "m2"|"fixed", durationMinutes, sort, enabled }`

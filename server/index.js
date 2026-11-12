@@ -45,6 +45,7 @@ const worksFile = path.join(dataDir, 'works.json');
 const uploadsRoot = path.join(dataDir, 'uploads');
 const releasesDir = path.join(root, 'releases');
 const apkFile = path.join(releasesDir, 'svetlana-schedule.apk');
+const appVersionFile = path.join(releasesDir, 'app-version.json');
 const port = Number(process.env.PORT || 3000);
 const masterToken = String(process.env.MASTER_TOKEN || '').trim();
 const apkDownloadPin = String(process.env.APK_DOWNLOAD_PIN || '').trim();
@@ -209,6 +210,31 @@ async function apkFileReady() {
   }
 }
 
+async function readAppVersion() {
+  const raw = await fs.readFile(appVersionFile, 'utf8');
+  const parsed = JSON.parse(raw);
+  const versionCode = Number(parsed.versionCode);
+  const versionName = String(parsed.versionName || '').trim();
+  if (!Number.isFinite(versionCode) || versionCode < 1 || !versionName) {
+    throw new Error('Invalid app-version.json');
+  }
+  return {
+    versionName,
+    versionCode: Math.floor(versionCode),
+    apkFileName: String(parsed.apkFileName || 'svetlana-schedule.apk').trim() || 'svetlana-schedule.apk',
+  };
+}
+
+function sendApkFile(res) {
+  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+  return res.download(apkFile, 'svetlana-schedule.apk', (err) => {
+    if (err && !res.headersSent) {
+      console.error('apk_download_error', err);
+      res.status(500).json({ error: 'Не удалось отдать APK' });
+    }
+  });
+}
+
 async function cleanupTemp(file) {
   if (!file?.path) return;
   try {
@@ -248,6 +274,36 @@ async function loadAvailabilityPayload() {
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
+});
+
+app.get('/api/app-version', async (_req, res) => {
+  try {
+    const version = await readAppVersion();
+    const ready = await apkFileReady();
+    res.set('Cache-Control', 'no-store');
+    return res.json({
+      ...version,
+      apkReady: ready,
+      downloadPath: '/api/app-apk',
+    });
+  } catch (error) {
+    console.error('app_version_read_error', error);
+    return res.status(404).json({ error: 'Версия приложения не настроена' });
+  }
+});
+
+app.get('/api/app-apk', async (req, res) => {
+  try {
+    if (!requireMasterToken(req, res)) return;
+    if (!(await apkFileReady())) {
+      return res.status(404).json({ error: 'APK ещё не загружен на сервер' });
+    }
+    res.set('Cache-Control', 'no-store');
+    return sendApkFile(res);
+  } catch (error) {
+    console.error('app_apk_download_error', error);
+    return res.status(500).json({ error: 'Не удалось отдать APK' });
+  }
 });
 
 app.get('/api/availability', async (_req, res) => {
@@ -518,6 +574,7 @@ app.post('/app-download', apkDownloadLimiter, async (req, res) => {
     }
   });
 });
+
 
 app.use(
   '/uploads',

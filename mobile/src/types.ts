@@ -44,3 +44,10 @@ export type WorkItem = {
   avgRating: number;
   ratingCount: number;
 };
+
+export type AppVersionInfo = {
+  versionName: string;
+  versionCode: number;
+  apkReady: boolean;
+  downloadPath: string;
+};

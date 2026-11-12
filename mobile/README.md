@@ -12,6 +12,13 @@
 
 Для локальной отладки можно указать `http://IP_ВАШЕГО_ПК:3080` (телефон и ПК в одной Wi‑Fi).
 
+## Обновление APK из приложения
+
+1. Поднимите `version` / `android.versionCode` в `app.json`.
+2. Соберите APK и положите на VPS как `releases/svetlana-schedule.apk`.
+3. Обновите `releases/app-version.json` тем же `versionName` / `versionCode`.
+4. В приложении при открытии появится плашка на «График», если серверная версия новее.
+
 ## Разработка
 
 ```bash

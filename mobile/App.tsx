@@ -23,6 +23,12 @@ import {
   uploadWork,
 } from './src/api';
 import {
+  downloadAndInstallApk,
+  fetchAppVersion,
+  getLocalAppVersion,
+  hasNewerAppVersion,
+} from './src/appUpdate';
+import {
   WORK_END,
   WORK_START,
   deriveStatus,
@@ -33,9 +39,11 @@ import {
   toggleHour,
 } from './src/schedule';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './src/storage';
-import type { AppSettings, AvailabilityPayload, DayPlan, WorkItem } from './src/types';
+import type { AppSettings, AppVersionInfo, AvailabilityPayload, DayPlan, WorkItem } from './src/types';
 
 type Tab = 'schedule' | 'frames' | 'settings';
+
+const localAppVersion = getLocalAppVersion();
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('schedule');
@@ -54,6 +62,9 @@ export default function App() {
   const [worksLoading, setWorksLoading] = useState(false);
   const [caption, setCaption] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [remoteVersion, setRemoteVersion] = useState<AppVersionInfo | null>(null);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateInstalling, setUpdateInstalling] = useState(false);
 
   const selectedDay = useMemo(
     () => weekPlan.find((d) => d.key === selectedKey) || weekPlan[0],
@@ -94,6 +105,39 @@ export default function App() {
     }
   }, [settings.serverUrl]);
 
+  const updateAvailable = Boolean(remoteVersion && hasNewerAppVersion(remoteVersion));
+
+  const checkForAppUpdate = useCallback(async (serverUrl = settings.serverUrl) => {
+    if (!serverUrl.trim()) return;
+    setUpdateChecking(true);
+    try {
+      const remote = await fetchAppVersion(serverUrl);
+      setRemoteVersion(remote);
+    } catch {
+      /* keep last known state; offline should not scare the master */
+    } finally {
+      setUpdateChecking(false);
+    }
+  }, [settings.serverUrl]);
+
+  const onInstallAppUpdate = useCallback(async () => {
+    if (!updateAvailable || !remoteVersion) return;
+    setUpdateInstalling(true);
+    setMessage('');
+    try {
+      await downloadAndInstallApk(
+        settings.serverUrl,
+        settings.masterToken,
+        remoteVersion.downloadPath
+      );
+      setMessage('Откройте установщик и подтвердите обновление');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Ошибка обновления');
+    } finally {
+      setUpdateInstalling(false);
+    }
+  }, [remoteVersion, settings.masterToken, settings.serverUrl, updateAvailable]);
+
   useEffect(() => {
     (async () => {
       const loaded = await loadSettings();
@@ -105,6 +149,10 @@ export default function App() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    checkForAppUpdate();
+  }, [checkForAppUpdate]);
 
   useEffect(() => {
     if (tab === 'frames') refreshWorks();
@@ -152,6 +200,7 @@ export default function App() {
     setDraftSettings(next);
     setMessage('Настройки сохранены');
     setTab('schedule');
+    checkForAppUpdate(next.serverUrl);
   };
 
   const onPing = async () => {
@@ -248,12 +297,34 @@ export default function App() {
           style={[styles.tab, tab === 'settings' && styles.tabActive]}
           onPress={() => setTab('settings')}
         >
-          <Text style={[styles.tabText, tab === 'settings' && styles.tabTextActive]}>Настройки</Text>
+          <View style={styles.tabLabelRow}>
+            <Text style={[styles.tabText, tab === 'settings' && styles.tabTextActive]}>Настройки</Text>
+            {updateAvailable ? <View style={styles.tabBadge} /> : null}
+          </View>
         </Pressable>
       </View>
 
       {tab === 'schedule' ? (
         <ScrollView contentContainerStyle={styles.content}>
+          {updateAvailable ? (
+            <View style={styles.updateBanner}>
+              <Text style={styles.updateBannerTitle}>Доступно обновление</Text>
+              <Text style={styles.updateBannerText}>
+                На сайте новая версия {remoteVersion?.versionName}. Установите, чтобы получить свежие
+                улучшения.
+              </Text>
+              <Pressable
+                style={[styles.primaryBtn, updateInstalling && styles.btnDisabled]}
+                onPress={onInstallAppUpdate}
+                disabled={updateInstalling}
+              >
+                <Text style={styles.primaryText}>
+                  {updateInstalling ? 'Скачивание…' : `Обновить до ${remoteVersion?.versionName}`}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
           <View
             style={[
               styles.liveCard,
@@ -457,6 +528,45 @@ export default function App() {
               <Text style={styles.primaryText}>Сохранить</Text>
             </Pressable>
           </View>
+
+          <Text style={styles.sectionLabel}>Версия приложения</Text>
+          <Text style={styles.hint}>
+            Сейчас установлена {localAppVersion.versionName} (код {localAppVersion.versionCode})
+            {remoteVersion
+              ? `. На сервере: ${remoteVersion.versionName} (код ${remoteVersion.versionCode})`
+              : ''}
+          </Text>
+          <Pressable
+            style={[
+              styles.primaryBtn,
+              (!updateAvailable || updateInstalling) && styles.updateBtnDisabled,
+            ]}
+            onPress={onInstallAppUpdate}
+            disabled={!updateAvailable || updateInstalling}
+          >
+            <Text
+              style={[
+                styles.primaryText,
+                (!updateAvailable || updateInstalling) && styles.updateBtnDisabledText,
+              ]}
+            >
+              {updateInstalling
+                ? 'Скачивание…'
+                : updateAvailable
+                  ? `Обновить до ${remoteVersion?.versionName}`
+                  : updateChecking
+                    ? 'Проверка обновлений…'
+                    : 'Обновлений нет'}
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.secondaryBtn, { marginTop: 10 }]}
+            onPress={() => checkForAppUpdate()}
+            disabled={updateChecking || updateInstalling}
+          >
+            <Text style={styles.secondaryText}>Проверить обновление</Text>
+          </Pressable>
+
           {message ? <Text style={styles.message}>{message}</Text> : null}
         </ScrollView>
       ) : null}
@@ -480,9 +590,29 @@ const styles = StyleSheet.create({
   },
   tab: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
   tabActive: { backgroundColor: '#ecfdf5' },
+  tabLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   tabText: { color: '#64748b', fontWeight: '600', fontSize: 13 },
   tabTextActive: { color: '#0f766e' },
+  tabBadge: {
+    width: 8,
+    height: 8,
+    borderRadius: 99,
+    backgroundColor: '#ea580c',
+  },
   content: { padding: 16, paddingBottom: 40 },
+  updateBanner: {
+    backgroundColor: '#fff7ed',
+    borderColor: '#fdba74',
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 14,
+    gap: 8,
+  },
+  updateBannerTitle: { color: '#9a3412', fontWeight: '800', fontSize: 17 },
+  updateBannerText: { color: '#9a3412', opacity: 0.9, marginBottom: 4 },
+  updateBtnDisabled: { backgroundColor: '#cbd5e1', shadowOpacity: 0 },
+  updateBtnDisabledText: { color: '#64748b' },
   liveCard: { borderRadius: 18, padding: 16, marginBottom: 16 },
   liveFree: { backgroundColor: '#0f766e' },
   liveBusy: { backgroundColor: '#9a3412' },
