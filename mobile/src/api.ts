@@ -1,4 +1,14 @@
-import type { AvailabilityPayload, DayPlan, WorkItem } from './types';
+import type {
+  AvailabilityPayload,
+  CalculatorPayload,
+  CalculatorRates,
+  DayPlan,
+  PricesPayload,
+  PriceItem,
+  ServicesPayload,
+  ServiceCardItem,
+  WorkItem,
+} from './types';
 
 function apiBase(serverUrl: string): string {
   return serverUrl.trim().replace(/\/$/, '');
@@ -97,4 +107,118 @@ export async function deleteWork(serverUrl: string, token: string, id: string): 
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `Ошибка удаления (${res.status})`);
+}
+
+export async function fetchPrices(serverUrl: string, token: string): Promise<PricesPayload> {
+  const res = await fetch(`${apiBase(serverUrl)}/api/prices`, {
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Не удалось загрузить прайс (${res.status})`);
+  return body;
+}
+
+export async function savePrices(
+  serverUrl: string,
+  token: string,
+  items: PriceItem[],
+  note?: string
+): Promise<PricesPayload> {
+  const res = await fetch(`${apiBase(serverUrl)}/api/prices`, {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      meta: note != null ? { note } : undefined,
+      items: items.map((item, index) => ({
+        id: item.id,
+        name: item.name,
+        price: Number(item.price) || 0,
+        priceFrom: item.priceFrom !== false,
+        unit: item.unit === 'm2' ? 'm2' : 'fixed',
+        durationMinutes: Number(item.durationMinutes) || 0,
+        sort: Number.isFinite(Number(item.sort)) ? Number(item.sort) : (index + 1) * 10,
+        enabled: item.enabled !== false,
+      })),
+    }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Ошибка сохранения прайса (${res.status})`);
+  return body;
+}
+
+export async function fetchServices(serverUrl: string): Promise<ServicesPayload> {
+  const res = await fetch(`${apiBase(serverUrl)}/api/services`, {
+    headers: { Accept: 'application/json' },
+    cache: 'no-store',
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Не удалось загрузить услуги (${res.status})`);
+  return body;
+}
+
+export async function saveServices(
+  serverUrl: string,
+  token: string,
+  items: ServiceCardItem[]
+): Promise<ServicesPayload> {
+  const res = await fetch(`${apiBase(serverUrl)}/api/services`, {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      items: items.map((item) => ({
+        id: item.id,
+        price: Number(item.price) || 0,
+        priceFrom: item.priceFrom !== false,
+        unit: item.unit,
+        durationMinutes: item.durationMinutes,
+        durationMinutesMax: item.durationMinutesMax,
+        durationApprox: item.durationApprox === true,
+        durationText: item.durationText || '',
+      })),
+    }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Ошибка сохранения услуг (${res.status})`);
+  return body;
+}
+
+export async function fetchCalculator(serverUrl: string): Promise<CalculatorPayload> {
+  const res = await fetch(`${apiBase(serverUrl)}/api/calculator`, {
+    headers: { Accept: 'application/json' },
+    cache: 'no-store',
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Не удалось загрузить калькулятор (${res.status})`);
+  return body;
+}
+
+export async function saveCalculator(
+  serverUrl: string,
+  token: string,
+  rates: CalculatorRates
+): Promise<CalculatorPayload> {
+  const res = await fetch(`${apiBase(serverUrl)}/api/calculator`, {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ rates }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Ошибка сохранения калькулятора (${res.status})`);
+  return body;
 }

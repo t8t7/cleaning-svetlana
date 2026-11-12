@@ -13,11 +13,18 @@ import {
   writeAvailabilityAtomic,
 } from './availability.js';
 import {
+  managePrices,
   publicPrices,
   readPrices,
   validatePricesPayload,
   writePricesAtomic,
 } from './prices.js';
+import {
+  publicCalculator,
+  readCalculator,
+  validateCalculatorPayload,
+  writeCalculatorAtomic,
+} from './calculator.js';
 import {
   publicServiceCards,
   readServiceCards,
@@ -40,6 +47,7 @@ const dataDir = path.join(root, 'data');
 const leadsFile = path.join(dataDir, 'leads.jsonl');
 const availabilityFile = path.join(dataDir, 'availability.json');
 const pricesFile = path.join(dataDir, 'prices.json');
+const calculatorFile = path.join(dataDir, 'calculator.json');
 const serviceCardsFile = path.join(dataDir, 'service-cards.json');
 const worksFile = path.join(dataDir, 'works.json');
 const uploadsRoot = path.join(dataDir, 'uploads');
@@ -128,6 +136,12 @@ function extractBearer(req) {
   const header = String(req.get('authorization') || '');
   const match = header.match(/^Bearer\s+(.+)$/i);
   return match ? match[1].trim() : '';
+}
+
+function isMasterRequest(req) {
+  if (!masterToken) return false;
+  const token = extractBearer(req);
+  return Boolean(token && token === masterToken);
 }
 
 function requireMasterToken(req, res) {
@@ -371,11 +385,11 @@ app.put('/api/availability', availabilityWriteLimiter, async (req, res) => {
   }
 });
 
-app.get('/api/prices', async (_req, res) => {
+app.get('/api/prices', async (req, res) => {
   try {
     const data = await readPrices(pricesFile);
     res.set('Cache-Control', 'no-store');
-    return res.json(publicPrices(data));
+    return res.json(isMasterRequest(req) ? managePrices(data) : publicPrices(data));
   } catch (error) {
     console.error('prices_read_error', error);
     return res.status(500).json({ error: 'Не удалось прочитать прайс' });
@@ -393,10 +407,39 @@ app.put('/api/prices', pricesWriteLimiter, async (req, res) => {
 
     await writePricesAtomic(pricesFile, checked.data);
     res.set('Cache-Control', 'no-store');
-    return res.json({ ok: true, ...publicPrices(checked.data) });
+    return res.json({ ok: true, ...managePrices(checked.data) });
   } catch (error) {
     console.error('prices_write_error', error);
     return res.status(500).json({ error: 'Не удалось сохранить прайс' });
+  }
+});
+
+app.get('/api/calculator', async (_req, res) => {
+  try {
+    const data = await readCalculator(calculatorFile);
+    res.set('Cache-Control', 'no-store');
+    return res.json(publicCalculator(data));
+  } catch (error) {
+    console.error('calculator_read_error', error);
+    return res.status(500).json({ error: 'Не удалось прочитать калькулятор' });
+  }
+});
+
+app.put('/api/calculator', pricesWriteLimiter, async (req, res) => {
+  try {
+    if (!requireMasterToken(req, res)) return;
+
+    const checked = validateCalculatorPayload(req.body);
+    if (!checked.ok) {
+      return res.status(400).json({ error: checked.error });
+    }
+
+    await writeCalculatorAtomic(calculatorFile, checked.data);
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, ...publicCalculator(checked.data) });
+  } catch (error) {
+    console.error('calculator_write_error', error);
+    return res.status(500).json({ error: 'Не удалось сохранить калькулятор' });
   }
 });
 

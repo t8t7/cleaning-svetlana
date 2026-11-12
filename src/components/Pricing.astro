@@ -66,6 +66,7 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
   const table = document.querySelector('[data-price-table]');
   const noteEl = document.querySelector('[data-prices-note]');
   const dateEl = document.querySelector('[data-live-date]');
+  let calcRates = { ...calculatorBase };
 
   const formatMoney = (n) => `от ${n.toLocaleString('ru-RU')} ₽`;
 
@@ -82,7 +83,7 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
     const data = new FormData(form);
     const type = String(data.get('type') || 'general');
     const size = String(data.get('size') || 'one');
-    const value = calculatorBase[type]?.[size] ?? 0;
+    const value = calcRates[type]?.[size] ?? 0;
     out.textContent = formatMoney(value);
   };
 
@@ -125,10 +126,25 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
       });
   };
 
+  const loadCalculator = () => {
+    fetch('/api/calculator', { headers: { Accept: 'application/json' } })
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then((payload) => {
+        if (payload?.rates && typeof payload.rates === 'object') {
+          calcRates = payload.rates;
+          updateCalc();
+        }
+      })
+      .catch(() => {
+        /* keep SSR fallback */
+      });
+  };
+
   form?.addEventListener('change', updateCalc);
   updateCalc();
   tickDate();
   loadPrices();
+  loadCalculator();
   setInterval(tickDate, 60_000);
 </script>
 

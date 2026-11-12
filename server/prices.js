@@ -300,3 +300,17 @@ export function publicPrices(data) {
     serverTime: new Date().toISOString(),
   };
 }
+
+/** Full list for APK editor (includes disabled rows). */
+export function managePrices(data) {
+  const items = (data.items || [])
+    .slice()
+    .sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name, 'ru'))
+    .map(presentPriceItem);
+
+  return {
+    meta: data.meta,
+    items,
+    serverTime: new Date().toISOString(),
+  };
+}

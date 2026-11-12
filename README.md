@@ -46,9 +46,11 @@ docker compose down
 - `PUT /api/availability` — обновление с телефона (`Authorization: Bearer <MASTER_TOKEN>`)
 - `GET /api/app-version` — актуальная версия Android APK (`releases/app-version.json`)
 - `GET /api/app-apk` — скачать APK для обновления из приложения (`Authorization: Bearer <MASTER_TOKEN>`)
-- `GET /api/prices` — публичный прайс (для сайта)
+- `GET /api/prices` — публичный прайс (для сайта); с `Authorization: Bearer <MASTER_TOKEN>` — полный список включая выключенные
 - `PUT /api/prices` — полное обновление прайса с телефона (`Authorization: Bearer <MASTER_TOKEN>`)
   - позиция: `{ id, name, price, priceFrom, unit: "m2"|"fixed", durationMinutes, sort, enabled }`
+- `GET /api/calculator` — ориентиры калькулятора (студия/1/2/3 × тип уборки)
+- `PUT /api/calculator` — обновление калькулятора с телефона (`Authorization: Bearer <MASTER_TOKEN>`)
 - `GET /api/services` — цена/время карточек блока «Услуги» (названия на сайте статичны)
 - `PUT /api/services` — обновление цены/времени услуг (`Authorization: Bearer <MASTER_TOKEN>`)
   - карточка: `{ id: "general"|"after-repair"|"maintain"|"windows", price, priceFrom, unit: "m2"|"fixed"|"request", durationMinutes, durationMinutesMax, durationApprox, durationText }`

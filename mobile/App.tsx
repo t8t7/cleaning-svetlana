@@ -1,12 +1,13 @@
 import * as ImagePicker from 'expo-image-picker';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
+  Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -28,6 +29,7 @@ import {
   getLocalAppVersion,
   hasNewerAppVersion,
 } from './src/appUpdate';
+import { PricesPanel } from './src/PricesPanel';
 import {
   WORK_END,
   WORK_START,
@@ -41,22 +43,29 @@ import {
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './src/storage';
 import type { AppSettings, AppVersionInfo, AvailabilityPayload, DayPlan, WorkItem } from './src/types';
 
-type Tab = 'schedule' | 'frames' | 'settings';
+type Tab = 'schedule' | 'prices' | 'frames' | 'settings';
+type ToastKind = 'ok' | 'err';
 
 const localAppVersion = getLocalAppVersion();
+const TOAST_MS = 4200;
+const UPDATE_POLL_MS = 45_000;
+/** System bars already inset the window; only a small header gap + toast lift. */
+const TOP_PAD = Platform.OS === 'android' ? 6 : 12;
+const TOAST_BOTTOM = Platform.OS === 'android' ? 16 : 12;
 
 export default function App() {
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tab, setTab] = useState<Tab>('schedule');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [draftSettings, setDraftSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [weekPlan, setWeekPlan] = useState<DayPlan[]>([]);
   const [meta, setMeta] = useState<AvailabilityPayload['meta'] | null>(null);
   const [liveTitle, setLiveTitle] = useState('Загрузка…');
-  const [liveDetail, setLiveDetail] = useState('');
   const [selectedKey, setSelectedKey] = useState<string>('mon');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [toast, setToast] = useState<{ text: string; kind: ToastKind } | null>(null);
   const [dirty, setDirty] = useState(false);
   const [works, setWorks] = useState<WorkItem[]>([]);
   const [worksLoading, setWorksLoading] = useState(false);
@@ -65,6 +74,21 @@ export default function App() {
   const [remoteVersion, setRemoteVersion] = useState<AppVersionInfo | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInstalling, setUpdateInstalling] = useState(false);
+
+  const showToast = useCallback((text: string, kind: ToastKind = 'ok', ms = TOAST_MS) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ text, kind });
+    toastTimer.current = setTimeout(() => {
+      setToast(null);
+      toastTimer.current = null;
+    }, ms);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
 
   const selectedDay = useMemo(
     () => weekPlan.find((d) => d.key === selectedKey) || weekPlan[0],
@@ -75,7 +99,6 @@ export default function App() {
     setWeekPlan(data.weekPlan);
     setMeta(data.meta);
     setLiveTitle(data.live?.title || 'Сейчас свободна');
-    setLiveDetail(data.live?.detail || '');
     setSelectedKey(data.live?.today?.key || data.weekPlan[0]?.key || 'mon');
     setDirty(false);
   }, []);
@@ -107,18 +130,21 @@ export default function App() {
 
   const updateAvailable = Boolean(remoteVersion && hasNewerAppVersion(remoteVersion));
 
-  const checkForAppUpdate = useCallback(async (serverUrl = settings.serverUrl) => {
-    if (!serverUrl.trim()) return;
-    setUpdateChecking(true);
-    try {
-      const remote = await fetchAppVersion(serverUrl);
-      setRemoteVersion(remote);
-    } catch {
-      /* keep last known state; offline should not scare the master */
-    } finally {
-      setUpdateChecking(false);
-    }
-  }, [settings.serverUrl]);
+  const checkForAppUpdate = useCallback(
+    async (serverUrl = settings.serverUrl, opts?: { quiet?: boolean }) => {
+      if (!serverUrl.trim()) return;
+      if (!opts?.quiet) setUpdateChecking(true);
+      try {
+        const remote = await fetchAppVersion(serverUrl);
+        setRemoteVersion(remote);
+      } catch {
+        /* keep last known state; offline should not scare the master */
+      } finally {
+        if (!opts?.quiet) setUpdateChecking(false);
+      }
+    },
+    [settings.serverUrl]
+  );
 
   const onInstallAppUpdate = useCallback(async () => {
     if (!updateAvailable || !remoteVersion) return;
@@ -152,6 +178,16 @@ export default function App() {
 
   useEffect(() => {
     checkForAppUpdate();
+    const pollId = setInterval(() => {
+      checkForAppUpdate(undefined, { quiet: true });
+    }, UPDATE_POLL_MS);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') checkForAppUpdate(undefined, { quiet: true });
+    });
+    return () => {
+      clearInterval(pollId);
+      sub.remove();
+    };
   }, [checkForAppUpdate]);
 
   useEffect(() => {
@@ -182,9 +218,14 @@ export default function App() {
         meta || undefined
       );
       applyPayload(data);
-      setMessage('Расписание обновлено на сайте');
+      const dayLabel = selectedDay
+        ? `${selectedDay.label}, ${selectedDay.shortDate}`
+        : 'выбранный день';
+      showToast(`Сайт подтвердил: изменения по часам сохранены (${dayLabel})`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Ошибка сохранения');
+      const text = error instanceof Error ? error.message : 'Ошибка сохранения';
+      setMessage(text);
+      showToast(text, 'err');
     } finally {
       setSaving(false);
     }
@@ -205,10 +246,13 @@ export default function App() {
 
   const onPing = async () => {
     try {
-      const status = await pingServer(draftSettings.serverUrl.trim().replace(/\/$/, ''));
-      setMessage(`Связь OK: ${status}`);
+      await pingServer(draftSettings.serverUrl.trim().replace(/\/$/, ''));
+      showToast('ок ок');
+      setMessage('');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Нет связи');
+      const text = error instanceof Error ? error.message : 'Нет связи';
+      setMessage(text);
+      showToast(text, 'err');
     }
   };
 
@@ -273,11 +317,11 @@ export default function App() {
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <View style={[styles.safe, { paddingTop: TOP_PAD }]}>
       <StatusBar style="dark" />
       <View style={styles.header}>
         <Text style={styles.brand}>Светлана</Text>
-        <Text style={styles.subtitle}>Расписание и чистые кадры</Text>
+        <Text style={styles.subtitle}>График, цены и фото</Text>
       </View>
 
       <View style={styles.tabs}>
@@ -288,17 +332,23 @@ export default function App() {
           <Text style={[styles.tabText, tab === 'schedule' && styles.tabTextActive]}>График</Text>
         </Pressable>
         <Pressable
+          style={[styles.tab, tab === 'prices' && styles.tabActive]}
+          onPress={() => setTab('prices')}
+        >
+          <Text style={[styles.tabText, tab === 'prices' && styles.tabTextActive]}>Цены</Text>
+        </Pressable>
+        <Pressable
           style={[styles.tab, tab === 'frames' && styles.tabActive]}
           onPress={() => setTab('frames')}
         >
-          <Text style={[styles.tabText, tab === 'frames' && styles.tabTextActive]}>Кадры</Text>
+          <Text style={[styles.tabText, tab === 'frames' && styles.tabTextActive]}>Фото</Text>
         </Pressable>
         <Pressable
           style={[styles.tab, tab === 'settings' && styles.tabActive]}
           onPress={() => setTab('settings')}
         >
           <View style={styles.tabLabelRow}>
-            <Text style={[styles.tabText, tab === 'settings' && styles.tabTextActive]}>Настройки</Text>
+            <Text style={[styles.tabText, tab === 'settings' && styles.tabTextActive]}>Настр.</Text>
             {updateAvailable ? <View style={styles.tabBadge} /> : null}
           </View>
         </Pressable>
@@ -334,12 +384,6 @@ export default function App() {
             ]}
           >
             <Text style={styles.liveTitle}>{liveTitle}</Text>
-            <Text style={styles.liveDetail}>{liveDetail}</Text>
-            {meta?.updatedAt ? (
-              <Text style={styles.liveMeta}>
-                Обновлено: {new Date(meta.updatedAt).toLocaleString('ru-RU')}
-              </Text>
-            ) : null}
           </View>
 
           {loading ? (
@@ -350,6 +394,12 @@ export default function App() {
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.weekRow}>
                 {weekPlan.map((day) => {
                   const active = day.key === selectedDay?.key;
+                  const stateStyle =
+                    day.status === 'busy'
+                      ? styles.dayStateBusy
+                      : day.status === 'partial'
+                        ? styles.dayStatePartial
+                        : styles.dayStateFree;
                   return (
                     <Pressable
                       key={day.key}
@@ -358,7 +408,7 @@ export default function App() {
                     >
                       <Text style={styles.dayName}>{day.label}</Text>
                       <Text style={styles.dayDate}>{day.shortDate}</Text>
-                      <Text style={styles.dayState}>
+                      <Text style={[styles.dayState, stateStyle]} numberOfLines={1}>
                         {day.status === 'free'
                           ? 'Свободно'
                           : day.status === 'busy'
@@ -429,13 +479,24 @@ export default function App() {
             </>
           )}
 
-          {message ? <Text style={styles.message}>{message}</Text> : null}
+          {message && !toast ? <Text style={styles.message}>{message}</Text> : null}
+        </ScrollView>
+      ) : null}
+
+      {tab === 'prices' ? (
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <PricesPanel
+            serverUrl={settings.serverUrl}
+            masterToken={settings.masterToken}
+            onToast={showToast}
+            onNeedSettings={() => setTab('settings')}
+          />
         </ScrollView>
       ) : null}
 
       {tab === 'frames' ? (
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.sectionLabel}>Чистые кадры</Text>
+          <Text style={styles.sectionLabel}>Фото работ</Text>
           <Text style={styles.hint}>
             Загрузите фото работ — клиенты увидят их на сайте и смогут поставить оценку.
           </Text>
@@ -489,12 +550,13 @@ export default function App() {
             ) : null}
           </View>
 
-          {message ? <Text style={styles.message}>{message}</Text> : null}
+          {message && !toast ? <Text style={styles.message}>{message}</Text> : null}
         </ScrollView>
       ) : null}
 
       {tab === 'settings' ? (
         <ScrollView contentContainerStyle={styles.content}>
+          <Text style={styles.sectionLabel}>Настройки</Text>
           <Text style={styles.sectionLabel}>Адрес сайта / API</Text>
           <Text style={styles.hint}>
             Боевой сервер: https://test-fas.ru (для локальной отладки — http://IP_ПК:3080)
@@ -567,18 +629,47 @@ export default function App() {
             <Text style={styles.secondaryText}>Проверить обновление</Text>
           </Pressable>
 
-          {message ? <Text style={styles.message}>{message}</Text> : null}
+          {message && !toast ? <Text style={styles.message}>{message}</Text> : null}
         </ScrollView>
       ) : null}
-    </SafeAreaView>
+
+      {toast ? (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.toast,
+            toast.kind === 'err' ? styles.toastErr : styles.toastOk,
+            { bottom: TOAST_BOTTOM },
+          ]}
+        >
+          <Text style={styles.toastText}>{toast.text}</Text>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f0fdfa' },
-  header: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 },
+  header: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 8 },
   brand: { fontSize: 28, fontWeight: '800', color: '#115e59' },
   subtitle: { color: '#64748b', marginTop: 2 },
+  toast: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    elevation: 6,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  toastOk: { backgroundColor: '#0f766e' },
+  toastErr: { backgroundColor: '#9a3412' },
+  toastText: { color: '#fff', fontWeight: '700', textAlign: 'center', fontSize: 14 },
   tabs: {
     flexDirection: 'row',
     marginHorizontal: 16,
@@ -591,7 +682,7 @@ const styles = StyleSheet.create({
   tab: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
   tabActive: { backgroundColor: '#ecfdf5' },
   tabLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  tabText: { color: '#64748b', fontWeight: '600', fontSize: 13 },
+  tabText: { color: '#64748b', fontWeight: '600', fontSize: 12 },
   tabTextActive: { color: '#0f766e' },
   tabBadge: {
     width: 8,
@@ -599,7 +690,7 @@ const styles = StyleSheet.create({
     borderRadius: 99,
     backgroundColor: '#ea580c',
   },
-  content: { padding: 16, paddingBottom: 40 },
+  content: { padding: 16, paddingBottom: 28 },
   updateBanner: {
     backgroundColor: '#fff7ed',
     borderColor: '#fdba74',
@@ -613,17 +704,15 @@ const styles = StyleSheet.create({
   updateBannerText: { color: '#9a3412', opacity: 0.9, marginBottom: 4 },
   updateBtnDisabled: { backgroundColor: '#cbd5e1', shadowOpacity: 0 },
   updateBtnDisabledText: { color: '#64748b' },
-  liveCard: { borderRadius: 18, padding: 16, marginBottom: 16 },
+  liveCard: { borderRadius: 18, paddingVertical: 16, paddingHorizontal: 16, marginBottom: 16 },
   liveFree: { backgroundColor: '#0f766e' },
   liveBusy: { backgroundColor: '#9a3412' },
   liveTitle: { color: '#fff', fontSize: 22, fontWeight: '800' },
-  liveDetail: { color: '#fff', opacity: 0.92, marginTop: 6 },
-  liveMeta: { color: '#fff', opacity: 0.75, marginTop: 10, fontSize: 12 },
   sectionLabel: { fontWeight: '700', color: '#115e59', marginBottom: 8, marginTop: 4 },
   hint: { color: '#64748b', marginBottom: 8, fontSize: 13 },
   weekRow: { marginBottom: 12 },
   dayChip: {
-    width: 78,
+    width: 88,
     marginRight: 8,
     borderRadius: 14,
     padding: 10,
@@ -634,7 +723,10 @@ const styles = StyleSheet.create({
   dayChipActive: { borderColor: '#0f766e', backgroundColor: '#ecfdf5' },
   dayName: { fontWeight: '800', color: '#115e59' },
   dayDate: { color: '#64748b', fontSize: 12, marginTop: 2 },
-  dayState: { fontSize: 11, fontWeight: '700', marginTop: 6, color: '#0f766e' },
+  dayState: { fontSize: 12, fontWeight: '800', marginTop: 6 },
+  dayStateFree: { color: '#0f766e' },
+  dayStateBusy: { color: '#ea580c' },
+  dayStatePartial: { color: '#ca8a04' },
   quickRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   quickBtn: {
     flex: 1,
