@@ -190,7 +190,7 @@ const initialDayKey = live.today.key;
     });
   };
 
-  const applyAvailability = (data, { preserveSelection = false } = {}) => {
+  const applyAvailability = (data) => {
     const plan = withLocalWeekDates(Array.isArray(data.weekPlan) ? data.weekPlan : []);
     if (!plan.length || !weekStrip) return;
 
@@ -203,10 +203,7 @@ const initialDayKey = live.today.key;
     if (liveDetail) liveDetail.textContent = live.detail || '';
     if (liveKicker && data.meta?.note) liveKicker.textContent = data.meta.note;
 
-    const keptKey = preserveSelection
-      ? weekStrip.querySelector('[aria-selected="true"]')?.getAttribute('data-day-key')
-      : null;
-    const selectedKey = keptKey || live.today?.key || plan[((new Date().getDay() + 6) % 7)]?.key;
+    const selectedKey = live.today?.key || plan[((new Date().getDay() + 6) % 7)]?.key;
     weekStrip.innerHTML = plan
       .map((day) => {
         const selected = day.key === selectedKey;
@@ -227,51 +224,15 @@ const initialDayKey = live.today.key;
     if (active) selectDay(active);
   };
 
-  let hasLoadedAvailability = false;
-  let pollTimer = null;
-  const POLL_MS = 30_000;
-
-  const loadAvailability = () => {
-    fetch('/api/availability', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-    })
-      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
-      .then((data) => {
-        applyAvailability(data, { preserveSelection: hasLoadedAvailability });
-        hasLoadedAvailability = true;
-      })
-      .catch(() => {
-        if (!hasLoadedAvailability) refreshSsrDates();
-      });
-  };
-
-  const startPolling = () => {
-    if (pollTimer != null) return;
-    pollTimer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') loadAvailability();
-    }, POLL_MS);
-  };
-
-  const stopPolling = () => {
-    if (pollTimer == null) return;
-    window.clearInterval(pollTimer);
-    pollTimer = null;
-  };
-
   bindChips();
   refreshSsrDates();
-  loadAvailability();
-  startPolling();
 
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      loadAvailability();
-      startPolling();
-    } else {
-      stopPolling();
-    }
-  });
+  fetch('/api/availability', { headers: { Accept: 'application/json' } })
+    .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+    .then(applyAvailability)
+    .catch(() => {
+      refreshSsrDates();
+    });
 </script>
 
 <style>
