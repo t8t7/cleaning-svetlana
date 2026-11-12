@@ -259,18 +259,19 @@ async function cleanupTemp(file) {
 }
 
 const availabilityStreamClients = new Set();
+const pricingStreamClients = new Set();
 
-function sendAvailabilityEvent(res, event, payload) {
+function sendSseEvent(res, event, payload) {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-function broadcastAvailability(payload) {
-  for (const client of availabilityStreamClients) {
+function broadcastToClients(clients, event, payload) {
+  for (const client of clients) {
     try {
-      sendAvailabilityEvent(client, 'availability', payload);
+      sendSseEvent(client, event, payload);
     } catch {
-      availabilityStreamClients.delete(client);
+      clients.delete(client);
       try {
         client.end();
       } catch {
@@ -278,6 +279,14 @@ function broadcastAvailability(payload) {
       }
     }
   }
+}
+
+function broadcastAvailability(payload) {
+  broadcastToClients(availabilityStreamClients, 'availability', payload);
+}
+
+function broadcastPricingEvent(event, payload) {
+  broadcastToClients(pricingStreamClients, event, payload);
 }
 
 async function loadAvailabilityPayload() {
@@ -339,11 +348,11 @@ app.get('/api/availability/stream', async (req, res) => {
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
   availabilityStreamClients.add(res);
-  sendAvailabilityEvent(res, 'connected', { ok: true });
+  sendSseEvent(res, 'connected', { ok: true });
 
   try {
     const payload = await loadAvailabilityPayload();
-    sendAvailabilityEvent(res, 'availability', payload);
+    sendSseEvent(res, 'availability', payload);
   } catch (error) {
     console.error('availability_stream_seed_error', error);
   }
@@ -406,12 +415,53 @@ app.put('/api/prices', pricesWriteLimiter, async (req, res) => {
     }
 
     await writePricesAtomic(pricesFile, checked.data);
+    const publicPayload = publicPrices(checked.data);
+    broadcastPricingEvent('prices', publicPayload);
     res.set('Cache-Control', 'no-store');
     return res.json({ ok: true, ...managePrices(checked.data) });
   } catch (error) {
     console.error('prices_write_error', error);
     return res.status(500).json({ error: 'Не удалось сохранить прайс' });
   }
+});
+
+app.get('/api/pricing/stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  pricingStreamClients.add(res);
+  sendSseEvent(res, 'connected', { ok: true });
+
+  try {
+    const [prices, services, calculator] = await Promise.all([
+      readPrices(pricesFile),
+      readServiceCards(serviceCardsFile),
+      readCalculator(calculatorFile),
+    ]);
+    sendSseEvent(res, 'prices', publicPrices(prices));
+    sendSseEvent(res, 'services', publicServiceCards(services));
+    sendSseEvent(res, 'calculator', publicCalculator(calculator));
+  } catch (error) {
+    console.error('pricing_stream_seed_error', error);
+  }
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      clearInterval(heartbeat);
+    }
+  }, 25000);
+
+  const cleanup = () => {
+    clearInterval(heartbeat);
+    pricingStreamClients.delete(res);
+  };
+  req.on('close', cleanup);
+  req.on('error', cleanup);
 });
 
 app.get('/api/calculator', async (_req, res) => {
@@ -435,8 +485,10 @@ app.put('/api/calculator', pricesWriteLimiter, async (req, res) => {
     }
 
     await writeCalculatorAtomic(calculatorFile, checked.data);
+    const publicPayload = publicCalculator(checked.data);
+    broadcastPricingEvent('calculator', publicPayload);
     res.set('Cache-Control', 'no-store');
-    return res.json({ ok: true, ...publicCalculator(checked.data) });
+    return res.json({ ok: true, ...publicPayload });
   } catch (error) {
     console.error('calculator_write_error', error);
     return res.status(500).json({ error: 'Не удалось сохранить калькулятор' });
@@ -464,8 +516,10 @@ app.put('/api/services', pricesWriteLimiter, async (req, res) => {
     }
 
     await writeServiceCardsAtomic(serviceCardsFile, checked.data);
+    const publicPayload = publicServiceCards(checked.data);
+    broadcastPricingEvent('services', publicPayload);
     res.set('Cache-Control', 'no-store');
-    return res.json({ ok: true, ...publicServiceCards(checked.data) });
+    return res.json({ ok: true, ...publicPayload });
   } catch (error) {
     console.error('service_cards_write_error', error);
     return res.status(500).json({ error: 'Не удалось сохранить услуги' });

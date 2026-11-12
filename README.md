@@ -51,6 +51,7 @@ docker compose down
   - позиция: `{ id, name, price, priceFrom, unit: "m2"|"fixed", durationMinutes, sort, enabled }`
 - `GET /api/calculator` — ориентиры калькулятора (студия/1/2/3 × тип уборки)
 - `PUT /api/calculator` — обновление калькулятора с телефона (`Authorization: Bearer <MASTER_TOKEN>`)
+- `GET /api/pricing/stream` — мгновенные обновления прайса / услуг / калькулятора для открытых вкладок (SSE)
 - `GET /api/services` — цена/время карточек блока «Услуги» (названия на сайте статичны)
 - `PUT /api/services` — обновление цены/времени услуг (`Authorization: Bearer <MASTER_TOKEN>`)
   - карточка: `{ id: "general"|"after-repair"|"maintain"|"windows", price, priceFrom, unit: "m2"|"fixed"|"request", durationMinutes, durationMinutesMax, durationApprox, durationText }`

@@ -117,35 +117,98 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
     table.innerHTML = payload.items.map(rowHtml).join('');
   };
 
-  const loadPrices = () => {
-    fetch('/api/prices', { headers: { Accept: 'application/json' } })
-      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
-      .then(renderPrices)
-      .catch(() => {
-        /* keep SSR fallback */
-      });
+  const applyCalculator = (payload) => {
+    if (payload?.rates && typeof payload.rates === 'object') {
+      calcRates = payload.rates;
+      updateCalc();
+    }
   };
 
-  const loadCalculator = () => {
+  const loadPrices = () =>
+    fetch('/api/prices', { headers: { Accept: 'application/json' } })
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then(renderPrices);
+
+  const loadCalculator = () =>
     fetch('/api/calculator', { headers: { Accept: 'application/json' } })
       .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
-      .then((payload) => {
-        if (payload?.rates && typeof payload.rates === 'object') {
-          calcRates = payload.rates;
-          updateCalc();
-        }
-      })
-      .catch(() => {
-        /* keep SSR fallback */
-      });
+      .then(applyCalculator);
+
+  let eventSource = null;
+  let fallbackTimer = null;
+
+  const stopFallbackPolling = () => {
+    if (fallbackTimer == null) return;
+    window.clearInterval(fallbackTimer);
+    fallbackTimer = null;
+  };
+
+  const startFallbackPolling = () => {
+    if (fallbackTimer != null) return;
+    fallbackTimer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      loadPrices().catch(() => {});
+      loadCalculator().catch(() => {});
+    }, 3000);
+  };
+
+  const connectPricingStream = () => {
+    if (!window.EventSource) {
+      startFallbackPolling();
+      return;
+    }
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+
+    eventSource = new EventSource('/api/pricing/stream');
+    eventSource.addEventListener('prices', (event) => {
+      try {
+        renderPrices(JSON.parse(event.data));
+        stopFallbackPolling();
+      } catch {
+        /* ignore bad payloads */
+      }
+    });
+    eventSource.addEventListener('calculator', (event) => {
+      try {
+        applyCalculator(JSON.parse(event.data));
+        stopFallbackPolling();
+      } catch {
+        /* ignore bad payloads */
+      }
+    });
+    eventSource.onerror = () => {
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      startFallbackPolling();
+      window.setTimeout(() => {
+        if (document.visibilityState === 'visible') connectPricingStream();
+      }, 2000);
+    };
   };
 
   form?.addEventListener('change', updateCalc);
   updateCalc();
   tickDate();
-  loadPrices();
-  loadCalculator();
+  Promise.all([loadPrices().catch(() => {}), loadCalculator().catch(() => {})]).finally(() => {
+    connectPricingStream();
+  });
   setInterval(tickDate, 60_000);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      loadPrices().catch(() => {});
+      loadCalculator().catch(() => {});
+      connectPricingStream();
+    } else if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+  });
 </script>
 
 <style>

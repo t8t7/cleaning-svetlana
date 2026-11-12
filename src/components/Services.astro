@@ -38,12 +38,76 @@ import { services } from '../data/site.js';
     }
   };
 
-  fetch('/api/services', { headers: { Accept: 'application/json' } })
-    .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
-    .then(applyServiceCards)
+  const loadServices = () =>
+    fetch('/api/services', { headers: { Accept: 'application/json' } })
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then(applyServiceCards);
+
+  let eventSource = null;
+  let fallbackTimer = null;
+
+  const stopFallbackPolling = () => {
+    if (fallbackTimer == null) return;
+    window.clearInterval(fallbackTimer);
+    fallbackTimer = null;
+  };
+
+  const startFallbackPolling = () => {
+    if (fallbackTimer != null) return;
+    fallbackTimer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      loadServices().catch(() => {});
+    }, 3000);
+  };
+
+  const connectPricingStream = () => {
+    if (!window.EventSource) {
+      startFallbackPolling();
+      return;
+    }
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+
+    eventSource = new EventSource('/api/pricing/stream');
+    eventSource.addEventListener('services', (event) => {
+      try {
+        applyServiceCards(JSON.parse(event.data));
+        stopFallbackPolling();
+      } catch {
+        /* ignore bad payloads */
+      }
+    });
+    eventSource.onerror = () => {
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      startFallbackPolling();
+      window.setTimeout(() => {
+        if (document.visibilityState === 'visible') connectPricingStream();
+      }, 2000);
+    };
+  };
+
+  loadServices()
     .catch(() => {
       /* keep SSR static fallback */
+    })
+    .finally(() => {
+      connectPricingStream();
     });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      loadServices().catch(() => {});
+      connectPricingStream();
+    } else if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+  });
 </script>
 
 <style>
