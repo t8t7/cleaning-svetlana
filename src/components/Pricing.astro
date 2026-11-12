@@ -135,28 +135,30 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
       .then(applyCalculator);
 
   let eventSource = null;
-  let fallbackTimer = null;
+  let pollTimer = null;
 
-  const stopFallbackPolling = () => {
-    if (fallbackTimer == null) return;
-    window.clearInterval(fallbackTimer);
-    fallbackTimer = null;
+  const refreshPricing = () => {
+    loadPrices().catch(() => {});
+    loadCalculator().catch(() => {});
   };
 
-  const startFallbackPolling = () => {
-    if (fallbackTimer != null) return;
-    fallbackTimer = window.setInterval(() => {
+  const stopPolling = () => {
+    if (pollTimer == null) return;
+    window.clearInterval(pollTimer);
+    pollTimer = null;
+  };
+
+  const startPolling = () => {
+    if (pollTimer != null) return;
+    // Keep a short poll even with SSE: Caddy may buffer streams until flush is configured.
+    pollTimer = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return;
-      loadPrices().catch(() => {});
-      loadCalculator().catch(() => {});
-    }, 3000);
+      refreshPricing();
+    }, 2000);
   };
 
   const connectPricingStream = () => {
-    if (!window.EventSource) {
-      startFallbackPolling();
-      return;
-    }
+    if (!window.EventSource) return;
     if (eventSource) {
       eventSource.close();
       eventSource = null;
@@ -166,7 +168,6 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
     eventSource.addEventListener('prices', (event) => {
       try {
         renderPrices(JSON.parse(event.data));
-        stopFallbackPolling();
       } catch {
         /* ignore bad payloads */
       }
@@ -174,7 +175,6 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
     eventSource.addEventListener('calculator', (event) => {
       try {
         applyCalculator(JSON.parse(event.data));
-        stopFallbackPolling();
       } catch {
         /* ignore bad payloads */
       }
@@ -184,7 +184,6 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
         eventSource.close();
         eventSource = null;
       }
-      startFallbackPolling();
       window.setTimeout(() => {
         if (document.visibilityState === 'visible') connectPricingStream();
       }, 2000);
@@ -194,19 +193,22 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
   form?.addEventListener('change', updateCalc);
   updateCalc();
   tickDate();
-  Promise.all([loadPrices().catch(() => {}), loadCalculator().catch(() => {})]).finally(() => {
-    connectPricingStream();
-  });
+  refreshPricing();
+  startPolling();
+  connectPricingStream();
   setInterval(tickDate, 60_000);
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      loadPrices().catch(() => {});
-      loadCalculator().catch(() => {});
+      refreshPricing();
+      startPolling();
       connectPricingStream();
-    } else if (eventSource) {
-      eventSource.close();
-      eventSource = null;
+    } else {
+      stopPolling();
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
     }
   });
 </script>

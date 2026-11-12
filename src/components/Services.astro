@@ -44,27 +44,24 @@ import { services } from '../data/site.js';
       .then(applyServiceCards);
 
   let eventSource = null;
-  let fallbackTimer = null;
+  let pollTimer = null;
 
-  const stopFallbackPolling = () => {
-    if (fallbackTimer == null) return;
-    window.clearInterval(fallbackTimer);
-    fallbackTimer = null;
+  const stopPolling = () => {
+    if (pollTimer == null) return;
+    window.clearInterval(pollTimer);
+    pollTimer = null;
   };
 
-  const startFallbackPolling = () => {
-    if (fallbackTimer != null) return;
-    fallbackTimer = window.setInterval(() => {
+  const startPolling = () => {
+    if (pollTimer != null) return;
+    pollTimer = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return;
       loadServices().catch(() => {});
-    }, 3000);
+    }, 2000);
   };
 
   const connectPricingStream = () => {
-    if (!window.EventSource) {
-      startFallbackPolling();
-      return;
-    }
+    if (!window.EventSource) return;
     if (eventSource) {
       eventSource.close();
       eventSource = null;
@@ -74,7 +71,6 @@ import { services } from '../data/site.js';
     eventSource.addEventListener('services', (event) => {
       try {
         applyServiceCards(JSON.parse(event.data));
-        stopFallbackPolling();
       } catch {
         /* ignore bad payloads */
       }
@@ -84,28 +80,29 @@ import { services } from '../data/site.js';
         eventSource.close();
         eventSource = null;
       }
-      startFallbackPolling();
       window.setTimeout(() => {
         if (document.visibilityState === 'visible') connectPricingStream();
       }, 2000);
     };
   };
 
-  loadServices()
-    .catch(() => {
-      /* keep SSR static fallback */
-    })
-    .finally(() => {
-      connectPricingStream();
-    });
+  loadServices().catch(() => {
+    /* keep SSR static fallback */
+  });
+  startPolling();
+  connectPricingStream();
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       loadServices().catch(() => {});
+      startPolling();
       connectPricingStream();
-    } else if (eventSource) {
-      eventSource.close();
-      eventSource = null;
+    } else {
+      stopPolling();
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
     }
   });
 </script>
