@@ -56,14 +56,16 @@
     .row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
     .grow { flex: 1 1 140px; }
     label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.35rem; }
-    input {
+    input, textarea, select {
       width: 100%;
       border-radius: 10px;
       border: 1px solid var(--line);
       background: #0f2925;
       color: var(--text);
       padding: 0.65rem 0.75rem;
+      font: inherit;
     }
+    textarea { min-height: 96px; resize: vertical; }
     button {
       border: 0;
       border-radius: 10px;
@@ -144,6 +146,24 @@
       </section>
 
       <section class="panel">
+        <h2>Сообщение в APK хозяина</h2>
+        <p class="meta">Короткий баннер в приложении: оплата, напоминание и т.п. Хозяин видит компактно сверху, без модалок.</p>
+        <label for="noticeText">Текст (до 280 символов)</label>
+        <textarea id="noticeText" maxlength="280" placeholder="Например: через 2 недели нужна оплата, иначе доступ будет приостановлен."></textarea>
+        <label for="noticeTone" style="margin-top:0.7rem">Цвет / важность</label>
+        <select id="noticeTone">
+          <option value="info">Спокойно (бирюзовый)</option>
+          <option value="warn" selected>Важно (янтарный)</option>
+          <option value="urgent">Срочно (коралловый)</option>
+        </select>
+        <p class="meta" id="noticeMeta" style="margin-top:0.65rem">Сейчас сообщения нет.</p>
+        <div class="row" style="margin-top:0.75rem">
+          <button id="saveNoticeBtn" type="button">Показать в APK</button>
+          <button class="danger" id="clearNoticeBtn" type="button">Убрать сообщение</button>
+        </div>
+      </section>
+
+      <section class="panel">
         <div class="row" style="justify-content:space-between;margin-bottom:0.5rem">
           <h2 style="margin:0">Устройства</h2>
           <span class="badge" id="deviceCount">0</span>
@@ -165,6 +185,9 @@
     const deviceCount = document.getElementById('deviceCount');
     const tokenResult = document.getElementById('tokenResult');
     const tokenValue = document.getElementById('tokenValue');
+    const noticeText = document.getElementById('noticeText');
+    const noticeTone = document.getElementById('noticeTone');
+    const noticeMeta = document.getElementById('noticeMeta');
     const toastEl = document.getElementById('toast');
 
     const toast = (text, err = false) => {
@@ -245,6 +268,15 @@
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
 
+    const renderNotice = (notice) => {
+      const active = Boolean(notice?.active && notice?.text);
+      noticeText.value = active ? notice.text : '';
+      noticeTone.value = notice?.tone || 'warn';
+      noticeMeta.textContent = active
+        ? `Сейчас в APK: «${notice.text}» · тон: ${notice.tone} · обновлено ${fmt(notice.updatedAt)}`
+        : 'Сейчас сообщения нет.';
+    };
+
     const refresh = async () => {
       const data = await api('/admin/api/overview');
       accessMeta.textContent =
@@ -252,6 +284,7 @@
         (data.access.hasPreviousGrace
           ? ` Старый токен ещё действует до ${fmt(data.access.previousValidUntil)} — чтобы телефоны успели обновиться.`
           : '');
+      renderNotice(data.notice || { active: false });
       renderDevices(data.devices || []);
     };
 
@@ -308,6 +341,32 @@
         toast('Скопировано');
       } catch {
         toast('Не удалось скопировать', true);
+      }
+    });
+
+    document.getElementById('saveNoticeBtn').addEventListener('click', async () => {
+      try {
+        const data = await api('/admin/api/notice', {
+          method: 'PUT',
+          body: JSON.stringify({
+            text: noticeText.value,
+            tone: noticeTone.value,
+          }),
+        });
+        renderNotice(data.notice || { active: false });
+        toast(data.notice?.active ? 'Сообщение уйдёт в APK' : 'Пустой текст — сообщение снято');
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+
+    document.getElementById('clearNoticeBtn').addEventListener('click', async () => {
+      try {
+        const data = await api('/admin/api/notice', { method: 'DELETE' });
+        renderNotice(data.notice || { active: false });
+        toast('Сообщение убрано из APK');
+      } catch (error) {
+        toast(error.message, true);
       }
     });
 

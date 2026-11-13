@@ -86,6 +86,11 @@ export default function App() {
   const [deviceBlocked, setDeviceBlocked] = useState(false);
   const [deviceLabel, setDeviceLabel] = useState('');
   const [deviceInfoLine, setDeviceInfoLine] = useState('');
+  const [ownerNotice, setOwnerNotice] = useState<{ active: boolean; text: string; tone: string }>({
+    active: false,
+    text: '',
+    tone: 'warn',
+  });
   const [remoteVersion, setRemoteVersion] = useState<AppVersionInfo | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInstalling, setUpdateInstalling] = useState(false);
@@ -203,6 +208,11 @@ export default function App() {
       const result = await syncDevice(settings.serverUrl, settings.masterToken);
       setDeviceBlocked(false);
       setDeviceLabel(result.device?.label || '');
+      setOwnerNotice({
+        active: Boolean(result.notice?.active && result.notice?.text),
+        text: result.notice?.text || '',
+        tone: result.notice?.tone || 'warn',
+      });
       if (result.masterToken && result.masterToken !== settings.masterToken) {
         const next = { ...settings, masterToken: result.masterToken };
         setSettings(next);
@@ -214,6 +224,7 @@ export default function App() {
       const blocked = Boolean((error as { blocked?: boolean })?.blocked);
       if (blocked) {
         setDeviceBlocked(true);
+        setOwnerNotice({ active: false, text: '', tone: 'warn' });
         showToast('Это устройство заблокировано', 'err');
       }
     }
@@ -443,6 +454,39 @@ export default function App() {
           <Text style={styles.blockedBanner}>
             Это устройство заблокировано в админке. Управление сайтом недоступно.
           </Text>
+        ) : null}
+        {!deviceBlocked && ownerNotice.active ? (
+          <View
+            style={[
+              styles.noticeBanner,
+              ownerNotice.tone === 'urgent'
+                ? styles.noticeUrgent
+                : ownerNotice.tone === 'info'
+                  ? styles.noticeInfo
+                  : styles.noticeWarn,
+            ]}
+          >
+            <Text
+              style={[
+                styles.noticeEyebrow,
+                ownerNotice.tone === 'urgent'
+                  ? styles.noticeEyebrowUrgent
+                  : ownerNotice.tone === 'info'
+                    ? styles.noticeEyebrowInfo
+                    : null,
+              ]}
+            >
+              Сообщение
+            </Text>
+            <Text
+              style={[
+                styles.noticeText,
+                ownerNotice.tone === 'urgent' ? styles.noticeTextUrgent : null,
+              ]}
+            >
+              {ownerNotice.text}
+            </Text>
+          </View>
         ) : null}
       </View>
 
@@ -821,6 +865,42 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     overflow: 'hidden',
   },
+  noticeBanner: {
+    marginTop: 10,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+  },
+  noticeInfo: {
+    backgroundColor: '#ecfeff',
+    borderColor: '#67e8f9',
+  },
+  noticeWarn: {
+    backgroundColor: '#fffbeb',
+    borderColor: '#fbbf24',
+  },
+  noticeUrgent: {
+    backgroundColor: '#fff1f2',
+    borderColor: '#fb7185',
+  },
+  noticeEyebrow: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    color: '#b45309',
+    marginBottom: 2,
+  },
+  noticeEyebrowInfo: { color: '#0e7490' },
+  noticeEyebrowUrgent: { color: '#be123c' },
+  noticeText: {
+    color: '#78350f',
+    fontWeight: '600',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  noticeTextUrgent: { color: '#9f1239' },
   toast: {
     position: 'absolute',
     left: 16,

@@ -61,6 +61,12 @@ import {
   createAdminSessionToken,
   readAdminSession,
 } from './adminAuth.js';
+import {
+  clearOwnerMessage,
+  publicOwnerMessage,
+  readOwnerMessage,
+  setOwnerMessage,
+} from './ownerMessage.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
@@ -74,6 +80,7 @@ const serviceCardsFile = path.join(dataDir, 'service-cards.json');
 const worksFile = path.join(dataDir, 'works.json');
 const accessFile = path.join(dataDir, 'access.json');
 const devicesFile = path.join(dataDir, 'devices.json');
+const ownerMessageFile = path.join(dataDir, 'owner-message.json');
 const adminHtmlFile = path.join(__dirname, 'admin.html');
 const uploadsRoot = path.join(dataDir, 'uploads');
 const releasesDir = path.join(root, 'releases');
@@ -872,12 +879,14 @@ app.post('/api/device/sync', availabilityWriteLimiter, async (req, res) => {
   try {
     if (!(await requireMasterToken(req, res, { requireDevice: true }))) return;
     const access = req.access || (await loadAccess());
+    const notice = publicOwnerMessage(await readOwnerMessage(ownerMessageFile));
     return res.json({
       ok: true,
       masterToken: access.masterToken,
       tokenVersion: access.tokenVersion,
       device: req.device,
       access: publicAccessState(access),
+      notice,
     });
   } catch (error) {
     console.error('device_sync_error', error);
@@ -921,11 +930,28 @@ app.get('/admin/api/overview', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const access = await loadAccess();
   const devices = await listDevices(devicesFile);
+  const notice = publicOwnerMessage(await readOwnerMessage(ownerMessageFile));
   return res.json({
     ok: true,
     access: publicAccessState(access),
     devices,
+    notice,
   });
+});
+
+app.put('/admin/api/notice', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const notice = await setOwnerMessage(ownerMessageFile, {
+    text: req.body?.text,
+    tone: req.body?.tone,
+  });
+  return res.json({ ok: true, notice: publicOwnerMessage(notice) });
+});
+
+app.delete('/admin/api/notice', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const notice = await clearOwnerMessage(ownerMessageFile);
+  return res.json({ ok: true, notice: publicOwnerMessage(notice) });
 });
 
 app.post('/admin/api/token/rotate', async (req, res) => {

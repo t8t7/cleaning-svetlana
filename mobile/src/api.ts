@@ -26,11 +26,19 @@ async function authHeaders(token: string, extra: Record<string, string> = {}) {
   };
 }
 
+export type OwnerNotice = {
+  active: boolean;
+  text: string;
+  tone: 'info' | 'warn' | 'urgent' | string;
+  updatedAt?: string | null;
+};
+
 export type DeviceSyncResult = {
   ok: boolean;
   masterToken: string;
   tokenVersion: number;
   blocked?: boolean;
+  notice?: OwnerNotice;
   device?: {
     id: string;
     label: string;
@@ -58,6 +66,14 @@ export async function syncDevice(serverUrl: string, token: string): Promise<Devi
     masterToken: String(body.masterToken || token),
     tokenVersion: Number(body.tokenVersion) || 1,
     device: body.device,
+    notice: body.notice
+      ? {
+          active: Boolean(body.notice.active && body.notice.text),
+          text: String(body.notice.text || ''),
+          tone: String(body.notice.tone || 'warn'),
+          updatedAt: body.notice.updatedAt || null,
+        }
+      : { active: false, text: '', tone: 'warn', updatedAt: null },
   };
 }
 
