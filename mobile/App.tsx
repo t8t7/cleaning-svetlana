@@ -28,7 +28,6 @@ import {
   updateWorkCaption,
   uploadWork,
 } from './src/api';
-import { getDeviceId, getDeviceProfile } from './src/device';
 import {
   downloadAndInstallApk,
   fetchAppVersion,
@@ -90,8 +89,6 @@ export default function App() {
   const [editCaption, setEditCaption] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   const [deviceBlocked, setDeviceBlocked] = useState(false);
-  const [deviceLabel, setDeviceLabel] = useState('');
-  const [deviceInfoLine, setDeviceInfoLine] = useState('');
   const [ownerNotice, setOwnerNotice] = useState<{ active: boolean; text: string; tone: string }>({
     active: false,
     text: '',
@@ -198,13 +195,6 @@ export default function App() {
       const loaded = await loadSettings();
       setSettings(loaded);
       setDraftSettings(loaded);
-      try {
-        const id = await getDeviceId();
-        const profile = getDeviceProfile();
-        setDeviceInfoLine(`${profile.name} · ${id.slice(0, 12)}…`);
-      } catch {
-        /* ignore */
-      }
     })();
   }, []);
 
@@ -213,7 +203,6 @@ export default function App() {
     try {
       const result = await syncDevice(settings.serverUrl, settings.masterToken);
       setDeviceBlocked(false);
-      setDeviceLabel(result.device?.label || '');
       setOwnerNotice({
         active: Boolean(result.notice?.active && result.notice?.text),
         text: result.notice?.text || '',
@@ -750,13 +739,6 @@ export default function App() {
               <Text style={styles.primaryText}>Сохранить</Text>
             </Pressable>
           </View>
-
-          <Text style={styles.sectionLabel}>Это устройство</Text>
-          <Text style={styles.hint}>
-            {deviceInfoLine || 'Определяется…'}
-            {deviceLabel ? ` · метка: ${deviceLabel}` : ''}
-            {deviceBlocked ? ' · ЗАБЛОКИРОВАНО' : ''}
-          </Text>
 
           <Text style={styles.sectionLabel}>Версия приложения</Text>
           <Text style={styles.hint}>
