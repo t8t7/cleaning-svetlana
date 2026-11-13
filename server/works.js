@@ -250,6 +250,21 @@ export async function deleteWork(filePath, uploadsDir, id) {
   return { ok: true };
 }
 
+export async function updateWorkCaption(filePath, id, caption) {
+  const data = await readWorks(filePath);
+  const item = data.items.find((entry) => entry.id === id);
+  if (!item) return { ok: false, error: 'Фото не найдено', status: 404 };
+
+  const next = sanitizeCaption(caption);
+  if (!next) {
+    return { ok: false, error: 'Укажите название фото', status: 400 };
+  }
+
+  item.caption = next;
+  await writeWorksAtomic(filePath, data);
+  return { ok: true, item: publicWork(item) };
+}
+
 export async function rateWork(filePath, id, stars) {
   const value = Number(stars);
   if (!Number.isInteger(value) || value < 1 || value > 5) {

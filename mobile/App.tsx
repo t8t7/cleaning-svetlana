@@ -6,6 +6,7 @@ import {
   Alert,
   AppState,
   Image,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -21,6 +22,7 @@ import {
   fetchWorks,
   pingServer,
   saveAvailability,
+  updateWorkCaption,
   uploadWork,
 } from './src/api';
 import {
@@ -48,13 +50,18 @@ type ToastKind = 'ok' | 'err';
 
 const localAppVersion = getLocalAppVersion();
 const TOAST_MS = 4200;
-const UPDATE_POLL_MS = 45_000;
+/** While app is open — ask server often; timers freeze in background/doze. */
+const UPDATE_POLL_MS = 20_000;
+/** Don't spam the version endpoint on rapid focus events. */
+const UPDATE_MIN_GAP_MS = 8_000;
 /** System bars already inset the window; only a small header gap + toast lift. */
 const TOP_PAD = Platform.OS === 'android' ? 6 : 12;
 const TOAST_BOTTOM = Platform.OS === 'android' ? 16 : 12;
 
 export default function App() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const appStateRef = useRef(AppState.currentState);
+  const lastUpdateCheckAt = useRef(0);
   const [tab, setTab] = useState<Tab>('schedule');
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [draftSettings, setDraftSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -71,6 +78,9 @@ export default function App() {
   const [worksLoading, setWorksLoading] = useState(false);
   const [caption, setCaption] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [editWork, setEditWork] = useState<WorkItem | null>(null);
+  const [editCaption, setEditCaption] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
   const [remoteVersion, setRemoteVersion] = useState<AppVersionInfo | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInstalling, setUpdateInstalling] = useState(false);
@@ -131,8 +141,11 @@ export default function App() {
   const updateAvailable = Boolean(remoteVersion && hasNewerAppVersion(remoteVersion));
 
   const checkForAppUpdate = useCallback(
-    async (serverUrl = settings.serverUrl, opts?: { quiet?: boolean }) => {
+    async (serverUrl = settings.serverUrl, opts?: { quiet?: boolean; force?: boolean }) => {
       if (!serverUrl.trim()) return;
+      const now = Date.now();
+      if (!opts?.force && now - lastUpdateCheckAt.current < UPDATE_MIN_GAP_MS) return;
+      lastUpdateCheckAt.current = now;
       if (!opts?.quiet) setUpdateChecking(true);
       try {
         const remote = await fetchAppVersion(serverUrl);
@@ -177,22 +190,33 @@ export default function App() {
   }, [refresh]);
 
   useEffect(() => {
-    checkForAppUpdate();
+    checkForAppUpdate(undefined, { force: true, quiet: true });
     const pollId = setInterval(() => {
-      checkForAppUpdate(undefined, { quiet: true });
+      // setInterval is paused while the phone sleeps; when JS wakes, poll again.
+      if (AppState.currentState === 'active') {
+        checkForAppUpdate(undefined, { quiet: true });
+      }
     }, UPDATE_POLL_MS);
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') checkForAppUpdate(undefined, { quiet: true });
+    const sub = AppState.addEventListener('change', (next) => {
+      const prev = appStateRef.current;
+      appStateRef.current = next;
+      // Unlock / return from background: always re-check (force bypasses min-gap).
+      if (next === 'active' && prev !== 'active') {
+        checkForAppUpdate(undefined, { force: true, quiet: true });
+        refresh();
+      }
     });
     return () => {
       clearInterval(pollId);
       sub.remove();
     };
-  }, [checkForAppUpdate]);
+  }, [checkForAppUpdate, refresh]);
 
   useEffect(() => {
+    // Switching tabs also re-asks the server (covers OEM lock screens that never leave "active").
+    checkForAppUpdate(undefined, { quiet: true });
     if (tab === 'frames') refreshWorks();
-  }, [tab, refreshWorks]);
+  }, [tab, refreshWorks, checkForAppUpdate]);
 
   const updateDay = (next: DayPlan) => {
     setWeekPlan((prev) =>
@@ -247,10 +271,10 @@ export default function App() {
   const onPing = async () => {
     try {
       await pingServer(draftSettings.serverUrl.trim().replace(/\/$/, ''));
-      showToast('ок ок');
+      showToast('Связь с сайтом есть');
       setMessage('');
     } catch (error) {
-      const text = error instanceof Error ? error.message : 'Нет связи';
+      const text = error instanceof Error ? error.message : 'Нет связи с сайтом';
       setMessage(text);
       showToast(text, 'err');
     }
@@ -258,21 +282,23 @@ export default function App() {
 
   const onPickAndUpload = async () => {
     if (!settings.masterToken) {
-      setMessage('Сначала укажите токен в настройках');
+      showToast('Сначала укажите токен в настройках', 'err');
       setTab('settings');
       return;
     }
 
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      setMessage('Нужен доступ к галерее');
+      showToast('Нужен доступ к галерее', 'err');
       return;
     }
 
+    // No Android crop/rotate screen — pick photo and upload straight to the site.
     const picked = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.85,
-      allowsEditing: true,
+      allowsEditing: false,
+      exif: false,
     });
     if (picked.canceled || !picked.assets?.[0]) return;
 
@@ -288,12 +314,52 @@ export default function App() {
         asset.mimeType || 'image/jpeg'
       );
       setCaption('');
-      setMessage('Фото добавлено в «Чистые кадры»');
       await refreshWorks();
+      showToast('Сайт подтвердил: фото загружено');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Ошибка загрузки');
+      const text = error instanceof Error ? error.message : 'Ошибка загрузки фото';
+      setMessage(text);
+      showToast(text, 'err');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const onEditWork = (item: WorkItem) => {
+    setEditWork(item);
+    setEditCaption(item.caption || '');
+  };
+
+  const onSaveEditWork = async () => {
+    if (!editWork) return;
+    const next = editCaption.trim();
+    if (!next) {
+      showToast('Введите название фото', 'err');
+      return;
+    }
+    if (!settings.masterToken.trim()) {
+      showToast('Сначала укажите токен в настройках', 'err');
+      setTab('settings');
+      return;
+    }
+
+    setEditSaving(true);
+    try {
+      await updateWorkCaption(
+        settings.serverUrl,
+        settings.masterToken,
+        editWork.id,
+        next
+      );
+      setEditWork(null);
+      await refreshWorks();
+      showToast('Сайт подтвердил: название обновлено');
+    } catch (error) {
+      const text = error instanceof Error ? error.message : 'Ошибка сохранения названия';
+      setMessage(text);
+      showToast(text, 'err');
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -306,10 +372,12 @@ export default function App() {
         onPress: async () => {
           try {
             await deleteWork(settings.serverUrl, settings.masterToken, item.id);
-            setMessage('Кадр удалён');
             await refreshWorks();
+            showToast('Сайт подтвердил: фото удалено');
           } catch (error) {
-            setMessage(error instanceof Error ? error.message : 'Ошибка удаления');
+            const text = error instanceof Error ? error.message : 'Ошибка удаления';
+            setMessage(text);
+            showToast(text, 'err');
           }
         },
       },
@@ -462,20 +530,15 @@ export default function App() {
                 </>
               ) : null}
 
-              <View style={styles.actions}>
-                <Pressable style={styles.secondaryBtn} onPress={refresh} disabled={loading || saving}>
-                  <Text style={styles.secondaryText}>Обновить</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.primaryBtn, (!dirty || saving) && styles.btnDisabled]}
-                  onPress={onSave}
-                  disabled={!dirty || saving}
-                >
-                  <Text style={styles.primaryText}>
-                    {saving ? 'Сохранение…' : 'Сохранить на сайт'}
-                  </Text>
-                </Pressable>
-              </View>
+              <Pressable
+                style={[styles.primaryBtn, (!dirty || saving) && styles.btnDisabled, { marginTop: 8 }]}
+                onPress={onSave}
+                disabled={!dirty || saving}
+              >
+                <Text style={styles.primaryText}>
+                  {saving ? 'Сохранение…' : 'Сохранить на сайт'}
+                </Text>
+              </Pressable>
             </>
           )}
 
@@ -498,7 +561,8 @@ export default function App() {
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.sectionLabel}>Фото работ</Text>
           <Text style={styles.hint}>
-            Загрузите фото работ — клиенты увидят их на сайте и смогут поставить оценку.
+            Выберите фото с телефона — оно сразу уйдёт на сайт в блок «Фото работ». Подпись
+            необязательна.
           </Text>
 
           <TextInput
@@ -510,22 +574,16 @@ export default function App() {
           />
 
           <Pressable
-            style={[styles.primaryBtn, uploading && styles.btnDisabled]}
+            style={[styles.primaryBtn, uploading && styles.btnDisabled, { marginBottom: 12 }]}
             onPress={onPickAndUpload}
             disabled={uploading}
           >
             <Text style={styles.primaryText}>
-              {uploading ? 'Загрузка…' : 'Выбрать фото и загрузить'}
+              {uploading ? 'Загрузка на сайт…' : 'Выбрать фото и загрузить на сайт'}
             </Text>
           </Pressable>
 
-          <View style={[styles.actions, { marginTop: 12 }]}>
-            <Pressable style={styles.secondaryBtn} onPress={refreshWorks} disabled={worksLoading}>
-              <Text style={styles.secondaryText}>Обновить список</Text>
-            </Pressable>
-          </View>
-
-          {worksLoading ? <ActivityIndicator color="#0f766e" style={{ marginTop: 20 }} /> : null}
+          {worksLoading ? <ActivityIndicator color="#0f766e" style={{ marginTop: 12 }} /> : null}
 
           <View style={styles.worksList}>
             {works.map((item) => (
@@ -536,17 +594,19 @@ export default function App() {
                 />
                 <View style={styles.workBody}>
                   <Text style={styles.workCaption}>{item.caption}</Text>
-                  <Text style={styles.workMeta}>
-                    ★ {Number(item.avgRating || 0).toFixed(1)} · {item.ratingCount || 0} оценок
-                  </Text>
-                  <Pressable style={styles.deleteBtn} onPress={() => onDeleteWork(item)}>
-                    <Text style={styles.deleteText}>Удалить</Text>
-                  </Pressable>
+                  <View style={styles.workActions}>
+                    <Pressable style={styles.editBtn} onPress={() => onEditWork(item)}>
+                      <Text style={styles.editText}>Редактировать</Text>
+                    </Pressable>
+                    <Pressable style={styles.deleteBtn} onPress={() => onDeleteWork(item)}>
+                      <Text style={styles.deleteText}>Удалить</Text>
+                    </Pressable>
+                  </View>
                 </View>
               </View>
             ))}
             {!worksLoading && works.length === 0 ? (
-              <Text style={styles.hint}>Пока нет загруженных кадров.</Text>
+              <Text style={styles.hint}>Пока нет загруженных фото — нажмите кнопку выше.</Text>
             ) : null}
           </View>
 
@@ -558,9 +618,6 @@ export default function App() {
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.sectionLabel}>Настройки</Text>
           <Text style={styles.sectionLabel}>Адрес сайта / API</Text>
-          <Text style={styles.hint}>
-            Боевой сервер: https://test-fas.ru (для локальной отладки — http://IP_ПК:3080)
-          </Text>
           <TextInput
             style={styles.input}
             autoCapitalize="none"
@@ -571,7 +628,6 @@ export default function App() {
           />
 
           <Text style={styles.sectionLabel}>Токен мастера</Text>
-          <Text style={styles.hint}>Тот же MASTER_TOKEN, что в .env на VPS</Text>
           <TextInput
             style={styles.input}
             autoCapitalize="none"
@@ -579,7 +635,7 @@ export default function App() {
             secureTextEntry
             value={draftSettings.masterToken}
             onChangeText={(masterToken) => setDraftSettings((s) => ({ ...s, masterToken }))}
-            placeholder="MASTER_TOKEN с сервера"
+            placeholder="Токен мастера"
           />
 
           <View style={styles.actions}>
@@ -632,6 +688,46 @@ export default function App() {
           {message && !toast ? <Text style={styles.message}>{message}</Text> : null}
         </ScrollView>
       ) : null}
+
+      <Modal
+        visible={Boolean(editWork)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!editSaving) setEditWork(null);
+        }}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Название фото</Text>
+            <TextInput
+              style={styles.input}
+              value={editCaption}
+              onChangeText={setEditCaption}
+              placeholder="Например: кухня после уборки"
+              maxLength={120}
+              autoFocus
+              editable={!editSaving}
+            />
+            <View style={styles.workActions}>
+              <Pressable
+                style={[styles.editBtn, editSaving && styles.btnDisabled]}
+                onPress={() => setEditWork(null)}
+                disabled={editSaving}
+              >
+                <Text style={styles.editText}>Отмена</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.primaryBtn, styles.modalSaveBtn, editSaving && styles.btnDisabled]}
+                onPress={onSaveEditWork}
+                disabled={editSaving}
+              >
+                <Text style={styles.primaryText}>{editSaving ? 'Сохранение…' : 'Сохранить'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {toast ? (
         <View
@@ -794,10 +890,18 @@ const styles = StyleSheet.create({
   },
   workImage: { width: '100%', height: 180, backgroundColor: '#ecfdf5' },
   workBody: { padding: 12 },
-  workCaption: { fontWeight: '700', color: '#115e59', marginBottom: 4 },
-  workMeta: { color: '#64748b', marginBottom: 10 },
+  workCaption: { fontWeight: '700', color: '#115e59', marginBottom: 10 },
+  workActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  editBtn: {
+    backgroundColor: '#ecfdf5',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+  },
+  editText: { color: '#0f766e', fontWeight: '700' },
   deleteBtn: {
-    alignSelf: 'flex-start',
     backgroundColor: '#fff7ed',
     borderRadius: 10,
     paddingHorizontal: 12,
@@ -806,4 +910,28 @@ const styles = StyleSheet.create({
     borderColor: '#fed7aa',
   },
   deleteText: { color: '#9a3412', fontWeight: '700' },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#d1e7e3',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#115e59',
+    marginBottom: 12,
+  },
+  modalSaveBtn: {
+    flexGrow: 1,
+    marginBottom: 0,
+    paddingHorizontal: 14,
+  },
 });

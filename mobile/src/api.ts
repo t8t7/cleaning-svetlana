@@ -1,7 +1,8 @@
+import * as FileSystem from 'expo-file-system/legacy';
 import type {
   AvailabilityPayload,
   CalculatorPayload,
-  CalculatorRates,
+  CalculatorItem,
   DayPlan,
   PricesPayload,
   PriceItem,
@@ -75,25 +76,47 @@ export async function uploadWork(
   caption: string,
   mimeType = 'image/jpeg'
 ): Promise<WorkItem> {
-  const form = new FormData();
-  const name = mimeType.includes('png') ? 'photo.png' : mimeType.includes('webp') ? 'photo.webp' : 'photo.jpg';
-  form.append('photo', {
-    uri,
-    name,
-    type: mimeType,
-  } as unknown as Blob);
-  form.append('caption', caption);
+  const name = mimeType.includes('png')
+    ? 'photo.png'
+    : mimeType.includes('webp')
+      ? 'photo.webp'
+      : 'photo.jpg';
 
-  const res = await fetch(`${apiBase(serverUrl)}/api/works`, {
-    method: 'POST',
+  // Gallery may return content:// — native multipart uploader needs a real file URI.
+  let fileUri = uri;
+  if (!fileUri.startsWith('file://')) {
+    const dest = `${FileSystem.cacheDirectory || ''}upload-${Date.now()}-${name}`;
+    await FileSystem.copyAsync({ from: fileUri, to: dest });
+    fileUri = dest;
+  }
+
+  // Avoid RN FormData ("Unsupported FormDataPart implementation") — use native upload.
+  const result = await FileSystem.uploadAsync(`${apiBase(serverUrl)}/api/works`, fileUri, {
+    httpMethod: 'POST',
+    uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+    fieldName: 'photo',
+    mimeType,
+    parameters: {
+      caption: caption || 'Работа',
+    },
     headers: {
       Accept: 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: form,
   });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || `Ошибка загрузки (${res.status})`);
+
+  let body: { error?: string; item?: WorkItem } = {};
+  try {
+    body = JSON.parse(result.body || '{}');
+  } catch {
+    body = {};
+  }
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error(body.error || `Ошибка загрузки (${result.status})`);
+  }
+  if (!body.item) {
+    throw new Error('Сервер не вернул загруженное фото');
+  }
   return body.item;
 }
 
@@ -107,6 +130,27 @@ export async function deleteWork(serverUrl: string, token: string, id: string): 
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `Ошибка удаления (${res.status})`);
+}
+
+export async function updateWorkCaption(
+  serverUrl: string,
+  token: string,
+  id: string,
+  caption: string
+): Promise<WorkItem> {
+  const res = await fetch(`${apiBase(serverUrl)}/api/works/${id}`, {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ caption }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Ошибка сохранения названия (${res.status})`);
+  if (!body.item) throw new Error('Сервер не вернул обновлённое фото');
+  return body.item;
 }
 
 export async function fetchPrices(serverUrl: string, token: string): Promise<PricesPayload> {
@@ -128,6 +172,19 @@ export async function savePrices(
   items: PriceItem[],
   note?: string
 ): Promise<PricesPayload> {
+  if (!Array.isArray(items) || items.length < 1) {
+    throw new Error('Нельзя сохранить пустой прайс');
+  }
+  const payloadItems = items.map((item, index) => ({
+    id: item.id,
+    name: item.name,
+    price: Number(item.price) || 0,
+    priceFrom: item.priceFrom !== false,
+    unit: item.unit === 'm2' ? 'm2' : 'fixed',
+    durationMinutes: Number(item.durationMinutes) || 0,
+    sort: Number.isFinite(Number(item.sort)) ? Number(item.sort) : (index + 1) * 10,
+    enabled: item.enabled !== false,
+  }));
   const res = await fetch(`${apiBase(serverUrl)}/api/prices`, {
     method: 'PUT',
     headers: {
@@ -137,20 +194,41 @@ export async function savePrices(
     },
     body: JSON.stringify({
       meta: note != null ? { note } : undefined,
-      items: items.map((item, index) => ({
-        id: item.id,
-        name: item.name,
-        price: Number(item.price) || 0,
-        priceFrom: item.priceFrom !== false,
-        unit: item.unit === 'm2' ? 'm2' : 'fixed',
-        durationMinutes: Number(item.durationMinutes) || 0,
-        sort: Number.isFinite(Number(item.sort)) ? Number(item.sort) : (index + 1) * 10,
-        enabled: item.enabled !== false,
-      })),
+      items: payloadItems,
     }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `Ошибка сохранения прайса (${res.status})`);
+
+  // Re-read public site payload — toast only after the site serves the exact list.
+  const verified = await fetch(`${apiBase(serverUrl)}/api/prices`, {
+    headers: { Accept: 'application/json' },
+    cache: 'no-store',
+  });
+  const verifiedBody = await verified.json().catch(() => ({}));
+  if (!verified.ok) {
+    throw new Error('Сайт не подтвердил прайс после сохранения');
+  }
+
+  const expected = payloadItems.filter((row) => row.enabled !== false);
+  const actual = Array.isArray(verifiedBody.items) ? verifiedBody.items : [];
+  const expectedIds = new Set(expected.map((row) => row.id));
+  const actualIds = new Set(actual.map((row: PriceItem) => row.id));
+
+  for (const item of expected) {
+    const found = actual.find((row: PriceItem) => row.id === item.id);
+    if (!found || Math.round(Number(found.price)) !== Math.round(item.price)) {
+      throw new Error(`Сайт не подтвердил цену «${item.name || item.id}»`);
+    }
+  }
+  for (const id of actualIds) {
+    if (!expectedIds.has(id)) {
+      throw new Error('На сайте осталась удалённая позиция прайса');
+    }
+  }
+  if (actual.length !== expected.length) {
+    throw new Error('Сайт отдал другой набор позиций прайса');
+  }
   return body;
 }
 
@@ -169,6 +247,16 @@ export async function saveServices(
   token: string,
   items: ServiceCardItem[]
 ): Promise<ServicesPayload> {
+  const payloadItems = items.map((item) => ({
+    id: item.id,
+    price: Number(item.price) || 0,
+    priceFrom: item.priceFrom !== false,
+    unit: item.unit,
+    durationMinutes: item.durationMinutes,
+    durationMinutesMax: item.durationMinutesMax,
+    durationApprox: item.durationApprox === true,
+    durationText: item.durationText || '',
+  }));
   const res = await fetch(`${apiBase(serverUrl)}/api/services`, {
     method: 'PUT',
     headers: {
@@ -176,21 +264,43 @@ export async function saveServices(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({
-      items: items.map((item) => ({
-        id: item.id,
-        price: Number(item.price) || 0,
-        priceFrom: item.priceFrom !== false,
-        unit: item.unit,
-        durationMinutes: item.durationMinutes,
-        durationMinutesMax: item.durationMinutesMax,
-        durationApprox: item.durationApprox === true,
-        durationText: item.durationText || '',
-      })),
-    }),
+    body: JSON.stringify({ items: payloadItems }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `Ошибка сохранения услуг (${res.status})`);
+
+  const verified = await fetch(`${apiBase(serverUrl)}/api/services`, {
+    headers: { Accept: 'application/json' },
+    cache: 'no-store',
+  });
+  const verifiedBody = await verified.json().catch(() => ({}));
+  if (!verified.ok) {
+    throw new Error('Сайт не подтвердил услуги после сохранения');
+  }
+  for (const item of payloadItems) {
+    const found = (verifiedBody.items || []).find((row: ServiceCardItem) => row.id === item.id);
+    const expectedPrice = item.unit === 'request' ? 0 : Math.round(Number(item.price) || 0);
+    if (!found || Math.round(Number(found.price)) !== expectedPrice) {
+      throw new Error(`Сайт не подтвердил услугу «${item.id}»`);
+    }
+  }
+
+  // Shared rows (general/windows) must also land in the public price table.
+  const pricesCheck = await fetch(`${apiBase(serverUrl)}/api/prices`, {
+    headers: { Accept: 'application/json' },
+    cache: 'no-store',
+  });
+  if (pricesCheck.ok) {
+    const pricesBody = await pricesCheck.json().catch(() => ({}));
+    for (const item of payloadItems.filter((row) => row.unit !== 'request')) {
+      const found = (pricesBody.items || []).find((row: PriceItem) => row.id === item.id);
+      if (!found) continue;
+      if (Math.round(Number(found.price)) !== Math.round(Number(item.price) || 0)) {
+        throw new Error(`Прайс на сайте не подтвердил «${item.id}»`);
+      }
+    }
+  }
+
   return body;
 }
 
@@ -207,8 +317,20 @@ export async function fetchCalculator(serverUrl: string): Promise<CalculatorPayl
 export async function saveCalculator(
   serverUrl: string,
   token: string,
-  rates: CalculatorRates
+  items: CalculatorItem[]
 ): Promise<CalculatorPayload> {
+  const payloadItems = items.map((item, index) => ({
+    id: item.id,
+    name: item.name,
+    sort: Number.isFinite(Number(item.sort)) ? Number(item.sort) : (index + 1) * 10,
+    enabled: item.enabled !== false,
+    rates: {
+      studio: Number(item.rates?.studio) || 0,
+      one: Number(item.rates?.one) || 0,
+      two: Number(item.rates?.two) || 0,
+      three: Number(item.rates?.three) || 0,
+    },
+  }));
   const res = await fetch(`${apiBase(serverUrl)}/api/calculator`, {
     method: 'PUT',
     headers: {
@@ -216,9 +338,35 @@ export async function saveCalculator(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ rates }),
+    body: JSON.stringify({ items: payloadItems }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `Ошибка сохранения калькулятора (${res.status})`);
+
+  const verified = await fetch(`${apiBase(serverUrl)}/api/calculator`, {
+    headers: { Accept: 'application/json' },
+    cache: 'no-store',
+  });
+  const verifiedBody = await verified.json().catch(() => ({}));
+  if (!verified.ok || !Array.isArray(verifiedBody.items)) {
+    throw new Error('Сайт не подтвердил калькулятор после сохранения');
+  }
+
+  const expectedIds = new Set(payloadItems.filter((row) => row.enabled !== false).map((row) => row.id));
+  const actualIds = new Set(verifiedBody.items.map((row: CalculatorItem) => row.id));
+  for (const item of payloadItems.filter((row) => row.enabled !== false)) {
+    const found = verifiedBody.items.find((row: CalculatorItem) => row.id === item.id);
+    if (!found) throw new Error(`Сайт не подтвердил услугу калькулятора «${item.name}»`);
+    for (const size of ['studio', 'one', 'two', 'three'] as const) {
+      if (Math.round(Number(found.rates?.[size])) !== Math.round(Number(item.rates[size]))) {
+        throw new Error('Сайт не подтвердил суммы калькулятора');
+      }
+    }
+  }
+  for (const id of actualIds) {
+    if (!expectedIds.has(id)) {
+      throw new Error('На сайте осталась удалённая услуга калькулятора');
+    }
+  }
   return body;
 }

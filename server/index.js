@@ -39,6 +39,7 @@ import {
   publicWork,
   rateWork,
   readWorks,
+  updateWorkCaption,
 } from './works.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -736,6 +737,25 @@ app.delete('/api/works/:id', worksWriteLimiter, async (req, res) => {
   } catch (error) {
     console.error('works_delete_error', error);
     return res.status(500).json({ error: 'Не удалось удалить фото' });
+  }
+});
+
+app.patch('/api/works/:id', worksWriteLimiter, async (req, res) => {
+  try {
+    if (!requireMasterToken(req, res)) return;
+    const result = await updateWorkCaption(
+      worksFile,
+      sanitize(req.params.id, 40),
+      req.body?.caption
+    );
+    if (!result.ok) {
+      return res.status(result.status || 400).json({ error: result.error });
+    }
+    await broadcastWorks();
+    return res.json({ ok: true, item: result.item });
+  } catch (error) {
+    console.error('works_caption_error', error);
+    return res.status(500).json({ error: 'Не удалось сохранить название' });
   }
 });
 
