@@ -160,8 +160,24 @@ export const faq = [
   },
 ];
 
-export const calculatorBase = {
-  maintain: { studio: 2500, one: 3200, two: 4200, three: 5500 },
-  general: { studio: 4500, one: 5900, two: 7900, three: 9900 },
-  afterRepair: { studio: 5500, one: 7200, two: 9800, three: 12800 },
-};
+export const calculatorItems = [
+  {
+    id: 'maintain',
+    name: 'Поддерживающая',
+    rates: { studio: 2500, one: 3200, two: 4200, three: 5500 },
+  },
+  {
+    id: 'general',
+    name: 'Генеральная',
+    rates: { studio: 4500, one: 5900, two: 7900, three: 9900 },
+  },
+  {
+    id: 'afterRepair',
+    name: 'После ремонта',
+    rates: { studio: 5500, one: 7200, two: 9800, three: 12800 },
+  },
+];
+
+export const calculatorBase = Object.fromEntries(
+  calculatorItems.map((item) => [item.id, item.rates])
+);

@@ -1,8 +1,9 @@
 ---
-import { calculatorBase } from '../data/site.js';
+import { calculatorBase, calculatorItems } from '../data/site.js';
 import { presentPriceItem, priceItems, pricesMeta } from '../data/prices.js';
 
 const initialItems = priceItems.filter((item) => item.enabled !== false).map(presentPriceItem);
+const initialCalcItems = calculatorItems;
 ---
 
 <section class="section pricing" id="pricing">
@@ -21,10 +22,12 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
       <form class="calc-form" id="calc-form">
         <label>
           Тип уборки
-          <select name="type" required>
-            <option value="maintain">Поддерживающая</option>
-            <option value="general" selected>Генеральная</option>
-            <option value="afterRepair">После ремонта</option>
+          <select name="type" required data-calc-type>
+            {initialCalcItems.map((item) => (
+              <option value={item.id} selected={item.id === 'general'}>
+                {item.name}
+              </option>
+            ))}
           </select>
         </label>
         <label>
@@ -60,13 +63,18 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
   </div>
 </section>
 
-<script define:vars={{ calculatorBase }}>
+<script define:vars={{ calculatorBase, calculatorItems: initialCalcItems }}>
   const form = document.getElementById('calc-form');
   const out = document.getElementById('calc-price');
+  const typeSelect =
+    document.querySelector('[data-calc-type]') ||
+    form?.querySelector('select[name="type"]') ||
+    null;
   const table = document.querySelector('[data-price-table]');
   const noteEl = document.querySelector('[data-prices-note]');
   const dateEl = document.querySelector('[data-live-date]');
   let calcRates = { ...calculatorBase };
+  let calcItems = Array.isArray(calculatorItems) ? calculatorItems.slice() : [];
 
   const formatMoney = (n) => `от ${n.toLocaleString('ru-RU')} ₽`;
 
@@ -77,6 +85,21 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+
+  const renderTypeOptions = (items) => {
+    if (!typeSelect || !Array.isArray(items) || !items.length) return;
+    const current = typeSelect.value;
+    const enabled = items.filter((item) => item && item.enabled !== false);
+    typeSelect.innerHTML = enabled
+      .map((item) => {
+        const selected = item.id === current || (!current && item.id === 'general');
+        return `<option value="${escapeHtml(item.id)}"${selected ? ' selected' : ''}>${escapeHtml(item.name)}</option>`;
+      })
+      .join('');
+    if (![...typeSelect.options].some((opt) => opt.value === typeSelect.value) && typeSelect.options.length) {
+      typeSelect.value = typeSelect.options[0].value;
+    }
+  };
 
   const updateCalc = () => {
     if (!form || !out) return;
@@ -113,14 +136,39 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
 
   const renderPrices = (payload) => {
     if (!table || !Array.isArray(payload?.items)) return;
+    // Guard: never wipe the visible price table from an empty payload.
+    if (!payload.items.length) return;
     if (noteEl && payload.meta?.note) noteEl.textContent = payload.meta.note;
-    // Empty list must clear the table (deleted rows must disappear).
     table.innerHTML = payload.items.map(rowHtml).join('');
   };
 
   const applyCalculator = (payload) => {
+    if (Array.isArray(payload?.items) && payload.items.length) {
+      calcItems = payload.items.filter((item) => item && item.enabled !== false);
+      calcRates = Object.fromEntries(
+        calcItems.map((item) => [
+          item.id,
+          {
+            studio: Number(item.rates?.studio) || 0,
+            one: Number(item.rates?.one) || 0,
+            two: Number(item.rates?.two) || 0,
+            three: Number(item.rates?.three) || 0,
+          },
+        ])
+      );
+      renderTypeOptions(calcItems);
+      updateCalc();
+      return;
+    }
     if (payload?.rates && typeof payload.rates === 'object') {
       calcRates = payload.rates;
+      // Legacy payload without items — still rebuild the type list from rate keys.
+      const fromRates = Object.keys(payload.rates).map((id) => ({
+        id,
+        name: calcItems.find((row) => row.id === id)?.name || id,
+        enabled: true,
+      }));
+      if (fromRates.length) renderTypeOptions(fromRates);
       updateCalc();
     }
   };
@@ -151,11 +199,11 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
 
   const startPolling = () => {
     if (pollTimer != null) return;
-    // Keep a short poll even with SSE: Caddy may buffer streams until flush is configured.
+    // Short poll: SSE can lag behind Caddy; calculator/types must appear quickly.
     pollTimer = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return;
       refreshPricing();
-    }, 2000);
+    }, 1000);
   };
 
   const connectPricingStream = () => {
