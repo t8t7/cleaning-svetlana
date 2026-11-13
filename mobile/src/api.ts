@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import { buildDeviceHeaders } from './device';
 import type {
   AvailabilityPayload,
   CalculatorPayload,
@@ -13,6 +14,51 @@ import type {
 
 function apiBase(serverUrl: string): string {
   return serverUrl.trim().replace(/\/$/, '');
+}
+
+async function authHeaders(token: string, extra: Record<string, string> = {}) {
+  const device = await buildDeviceHeaders();
+  return {
+    Accept: 'application/json',
+    Authorization: `Bearer ${token}`,
+    ...device,
+    ...extra,
+  };
+}
+
+export type DeviceSyncResult = {
+  ok: boolean;
+  masterToken: string;
+  tokenVersion: number;
+  blocked?: boolean;
+  device?: {
+    id: string;
+    label: string;
+    blocked: boolean;
+    name?: string;
+    model?: string;
+  };
+};
+
+export async function syncDevice(serverUrl: string, token: string): Promise<DeviceSyncResult> {
+  const res = await fetch(`${apiBase(serverUrl)}/api/device/sync`, {
+    method: 'POST',
+    headers: await authHeaders(token, { 'Content-Type': 'application/json' }),
+    body: '{}',
+  });
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 403 && body.blocked) {
+    const err = new Error(body.error || 'Устройство заблокировано') as Error & { blocked?: boolean };
+    err.blocked = true;
+    throw err;
+  }
+  if (!res.ok) throw new Error(body.error || `Синхронизация устройства (${res.status})`);
+  return {
+    ok: true,
+    masterToken: String(body.masterToken || token),
+    tokenVersion: Number(body.tokenVersion) || 1,
+    device: body.device,
+  };
 }
 
 export function absoluteUrl(serverUrl: string, pathOrUrl: string): string {
@@ -38,11 +84,7 @@ export async function saveAvailability(
 ): Promise<AvailabilityPayload> {
   const res = await fetch(`${apiBase(serverUrl)}/api/availability`, {
     method: 'PUT',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: await authHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ weekPlan, meta }),
   });
 
@@ -99,10 +141,7 @@ export async function uploadWork(
     parameters: {
       caption: caption || 'Работа',
     },
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: await authHeaders(token),
   });
 
   let body: { error?: string; item?: WorkItem } = {};
@@ -123,10 +162,7 @@ export async function uploadWork(
 export async function deleteWork(serverUrl: string, token: string, id: string): Promise<void> {
   const res = await fetch(`${apiBase(serverUrl)}/api/works/${id}`, {
     method: 'DELETE',
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: await authHeaders(token),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `Ошибка удаления (${res.status})`);
@@ -140,11 +176,7 @@ export async function updateWorkCaption(
 ): Promise<WorkItem> {
   const res = await fetch(`${apiBase(serverUrl)}/api/works/${id}`, {
     method: 'PATCH',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: await authHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ caption }),
   });
   const body = await res.json().catch(() => ({}));
@@ -155,10 +187,7 @@ export async function updateWorkCaption(
 
 export async function fetchPrices(serverUrl: string, token: string): Promise<PricesPayload> {
   const res = await fetch(`${apiBase(serverUrl)}/api/prices`, {
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: await authHeaders(token),
     cache: 'no-store',
   });
   const body = await res.json().catch(() => ({}));
@@ -187,11 +216,7 @@ export async function savePrices(
   }));
   const res = await fetch(`${apiBase(serverUrl)}/api/prices`, {
     method: 'PUT',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: await authHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       meta: note != null ? { note } : undefined,
       items: payloadItems,
@@ -259,11 +284,7 @@ export async function saveServices(
   }));
   const res = await fetch(`${apiBase(serverUrl)}/api/services`, {
     method: 'PUT',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: await authHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ items: payloadItems }),
   });
   const body = await res.json().catch(() => ({}));
@@ -333,11 +354,7 @@ export async function saveCalculator(
   }));
   const res = await fetch(`${apiBase(serverUrl)}/api/calculator`, {
     method: 'PUT',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers: await authHeaders(token, { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ items: payloadItems }),
   });
   const body = await res.json().catch(() => ({}));

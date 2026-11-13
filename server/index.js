@@ -41,6 +41,26 @@ import {
   readWorks,
   updateWorkCaption,
 } from './works.js';
+import {
+  ensureAccess,
+  publicAccessState,
+  rotateMasterToken,
+  tokenAccepted,
+} from './access.js';
+import {
+  getDevice,
+  listDevices,
+  removeDevice,
+  sanitizeDeviceId,
+  touchDevice,
+  updateDevice,
+} from './devices.js';
+import {
+  adminSessionCookie,
+  clearAdminSessionCookie,
+  createAdminSessionToken,
+  readAdminSession,
+} from './adminAuth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
@@ -52,12 +72,16 @@ const pricesFile = path.join(dataDir, 'prices.json');
 const calculatorFile = path.join(dataDir, 'calculator.json');
 const serviceCardsFile = path.join(dataDir, 'service-cards.json');
 const worksFile = path.join(dataDir, 'works.json');
+const accessFile = path.join(dataDir, 'access.json');
+const devicesFile = path.join(dataDir, 'devices.json');
+const adminHtmlFile = path.join(__dirname, 'admin.html');
 const uploadsRoot = path.join(dataDir, 'uploads');
 const releasesDir = path.join(root, 'releases');
 const apkFile = path.join(releasesDir, 'svetlana-schedule.apk');
 const appVersionFile = path.join(releasesDir, 'app-version.json');
 const port = Number(process.env.PORT || 3000);
-const masterToken = String(process.env.MASTER_TOKEN || '').trim();
+const masterTokenEnv = String(process.env.MASTER_TOKEN || '').trim();
+const adminPassword = String(process.env.ADMIN_PASSWORD || '').trim();
 const apkDownloadPin = String(process.env.APK_DOWNLOAD_PIN || '').trim();
 
 const app = express();
@@ -153,20 +177,83 @@ function extractBearer(req) {
   return match ? match[1].trim() : '';
 }
 
-function isMasterRequest(req) {
-  if (!masterToken) return false;
-  const token = extractBearer(req);
-  return Boolean(token && token === masterToken);
+function clientIp(req) {
+  return String(req.ip || req.socket?.remoteAddress || '')
+    .replace(/^::ffff:/, '')
+    .slice(0, 64);
 }
 
-function requireMasterToken(req, res) {
-  if (!masterToken) {
+function devicePayloadFromRequest(req) {
+  return {
+    id: sanitizeDeviceId(req.get('x-device-id')),
+    name: sanitize(req.get('x-device-name'), 80),
+    model: sanitize(req.get('x-device-model'), 80),
+    platform: sanitize(req.get('x-device-platform'), 40),
+    appVersion: sanitize(req.get('x-app-version'), 40),
+    ip: clientIp(req),
+  };
+}
+
+async function loadAccess() {
+  return ensureAccess(accessFile, masterTokenEnv);
+}
+
+async function isMasterRequest(req) {
+  const access = await loadAccess();
+  return tokenAccepted(access, extractBearer(req));
+}
+
+async function requireMasterToken(req, res, { requireDevice = false } = {}) {
+  const access = await loadAccess();
+  if (!access.masterToken) {
     res.status(503).json({ error: 'MASTER_TOKEN не настроен на сервере' });
     return false;
   }
   const token = extractBearer(req);
-  if (!token || token !== masterToken) {
+  if (!tokenAccepted(access, token)) {
     res.status(401).json({ error: 'Неверный токен' });
+    return false;
+  }
+
+  const deviceInfo = devicePayloadFromRequest(req);
+  if (!deviceInfo.id) {
+    if (requireDevice) {
+      res.status(400).json({ error: 'Нужен ID устройства. Обновите приложение.' });
+      return false;
+    }
+    req.access = access;
+    req.device = null;
+    return true;
+  }
+
+  const existing = await getDevice(devicesFile, deviceInfo.id);
+  if (existing?.blocked) {
+    res.status(403).json({ error: 'Это устройство заблокировано', blocked: true });
+    return false;
+  }
+
+  const touched = await touchDevice(devicesFile, deviceInfo);
+  if (!touched.ok) {
+    res.status(touched.status || 400).json({ error: touched.error || 'Ошибка устройства' });
+    return false;
+  }
+  if (touched.item.blocked) {
+    res.status(403).json({ error: 'Это устройство заблокировано', blocked: true });
+    return false;
+  }
+
+  req.access = access;
+  req.device = touched.item;
+  return true;
+}
+
+function requireAdmin(req, res) {
+  if (!adminPassword) {
+    res.status(503).json({ error: 'ADMIN_PASSWORD не настроен на сервере' });
+    return false;
+  }
+  if (!readAdminSession(req, adminPassword)) {
+    res.status(401).json({ error: 'Нужен вход в админку' });
     return false;
   }
   return true;
@@ -419,7 +506,7 @@ app.get('/api/app-version', async (_req, res) => {
 
 app.get('/api/app-apk', async (req, res) => {
   try {
-    if (!requireMasterToken(req, res)) return;
+    if (!(await requireMasterToken(req, res))) return;
     if (!(await apkFileReady())) {
       return res.status(404).json({ error: 'APK ещё не загружен на сервер' });
     }
@@ -477,7 +564,7 @@ app.get('/api/availability/stream', async (req, res) => {
 
 app.put('/api/availability', availabilityWriteLimiter, async (req, res) => {
   try {
-    if (!requireMasterToken(req, res)) return;
+    if (!(await requireMasterToken(req, res))) return;
 
     const checked = validateAvailabilityPayload(req.body);
     if (!checked.ok) {
@@ -500,7 +587,7 @@ app.get('/api/prices', async (req, res) => {
   try {
     const data = await readPrices(pricesFile);
     res.set('Cache-Control', 'no-store');
-    return res.json(isMasterRequest(req) ? managePrices(data) : publicPrices(data));
+    return res.json((await isMasterRequest(req)) ? managePrices(data) : publicPrices(data));
   } catch (error) {
     console.error('prices_read_error', error);
     return res.status(500).json({ error: 'Не удалось прочитать прайс' });
@@ -509,7 +596,7 @@ app.get('/api/prices', async (req, res) => {
 
 app.put('/api/prices', pricesWriteLimiter, async (req, res) => {
   try {
-    if (!requireMasterToken(req, res)) return;
+    if (!(await requireMasterToken(req, res))) return;
 
     const checked = validatePricesPayload(req.body);
     if (!checked.ok) {
@@ -593,7 +680,7 @@ app.get('/api/calculator', async (_req, res) => {
 
 app.put('/api/calculator', pricesWriteLimiter, async (req, res) => {
   try {
-    if (!requireMasterToken(req, res)) return;
+    if (!(await requireMasterToken(req, res))) return;
 
     const checked = validateCalculatorPayload(req.body);
     if (!checked.ok) {
@@ -624,7 +711,7 @@ app.get('/api/services', async (_req, res) => {
 
 app.put('/api/services', pricesWriteLimiter, async (req, res) => {
   try {
-    if (!requireMasterToken(req, res)) return;
+    if (!(await requireMasterToken(req, res))) return;
 
     const checked = validateServiceCardsPayload(req.body);
     if (!checked.ok) {
@@ -666,7 +753,7 @@ app.post('/api/works', worksWriteLimiter, (req, res) => {
           : err.message || 'Ошибка загрузки';
         return res.status(400).json({ error: message });
       }
-      if (!requireMasterToken(req, res)) {
+      if (!(await requireMasterToken(req, res))) {
         await cleanupTemp(req.file);
         return;
       }
@@ -726,7 +813,7 @@ app.get('/api/works/stream', async (req, res) => {
 
 app.delete('/api/works/:id', worksWriteLimiter, async (req, res) => {
   try {
-    if (!requireMasterToken(req, res)) return;
+    if (!(await requireMasterToken(req, res))) return;
     const uploadsDir = await ensureWorksDirs(dataDir);
     const result = await deleteWork(worksFile, uploadsDir, sanitize(req.params.id, 40));
     if (!result.ok) {
@@ -742,7 +829,7 @@ app.delete('/api/works/:id', worksWriteLimiter, async (req, res) => {
 
 app.patch('/api/works/:id', worksWriteLimiter, async (req, res) => {
   try {
-    if (!requireMasterToken(req, res)) return;
+    if (!(await requireMasterToken(req, res))) return;
     const result = await updateWorkCaption(
       worksFile,
       sanitize(req.params.id, 40),
@@ -771,6 +858,101 @@ app.post('/api/works/:id/rate', rateLimiter, async (req, res) => {
     console.error('works_rate_error', error);
     return res.status(500).json({ error: 'Не удалось сохранить оценку' });
   }
+});
+
+app.post('/api/device/sync', availabilityWriteLimiter, async (req, res) => {
+  try {
+    if (!(await requireMasterToken(req, res, { requireDevice: true }))) return;
+    const access = req.access || (await loadAccess());
+    return res.json({
+      ok: true,
+      masterToken: access.masterToken,
+      tokenVersion: access.tokenVersion,
+      device: req.device,
+      access: publicAccessState(access),
+    });
+  } catch (error) {
+    console.error('device_sync_error', error);
+    return res.status(500).json({ error: 'Не удалось синхронизировать устройство' });
+  }
+});
+
+app.get('/admin', async (_req, res) => {
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  res.set('Cache-Control', 'no-store');
+  try {
+    const html = await fs.readFile(adminHtmlFile, 'utf8');
+    return res.type('html').send(html);
+  } catch (error) {
+    console.error('admin_html_error', error);
+    return res.status(500).type('text').send('Admin UI missing');
+  }
+});
+
+app.post('/admin/api/login', async (req, res) => {
+  if (!adminPassword) {
+    return res.status(503).json({ error: 'ADMIN_PASSWORD не настроен на сервере' });
+  }
+  const provided = String(req.body?.password || '');
+  const a = Buffer.from(provided);
+  const b = Buffer.from(adminPassword);
+  if (a.length === 0 || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return res.status(401).json({ error: 'Неверный пароль' });
+  }
+  const token = createAdminSessionToken(adminPassword);
+  res.setHeader('Set-Cookie', adminSessionCookie(token, { secure: true }));
+  return res.json({ ok: true });
+});
+
+app.post('/admin/api/logout', (_req, res) => {
+  res.setHeader('Set-Cookie', clearAdminSessionCookie());
+  return res.json({ ok: true });
+});
+
+app.get('/admin/api/overview', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const access = await loadAccess();
+  const devices = await listDevices(devicesFile);
+  return res.json({
+    ok: true,
+    access: publicAccessState(access),
+    devices,
+  });
+});
+
+app.post('/admin/api/token/rotate', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const access = await rotateMasterToken(accessFile, masterTokenEnv, 24);
+  return res.json({
+    ok: true,
+    masterToken: access.masterToken,
+    access: publicAccessState(access),
+  });
+});
+
+app.patch('/admin/api/devices/:id', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const patch = {};
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'label')) {
+    patch.label = req.body.label;
+  }
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'blocked')) {
+    patch.blocked = req.body.blocked;
+  }
+  const result = await updateDevice(devicesFile, req.params.id, patch);
+  if (!result.ok) {
+    return res.status(result.status || 400).json({ error: result.error });
+  }
+  return res.json({ ok: true, item: result.item });
+});
+
+app.delete('/admin/api/devices/:id', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const result = await removeDevice(devicesFile, req.params.id);
+  if (!result.ok) {
+    return res.status(result.status || 400).json({ error: result.error });
+  }
+  return res.json({ ok: true });
 });
 
 app.post('/api/lead', leadLimiter, async (req, res) => {
@@ -876,6 +1058,13 @@ app.use((req, res) => {
 });
 
 await ensureWorksDirs(dataDir).catch(() => {});
+await ensureAccess(accessFile, masterTokenEnv)
+  .then((access) => {
+    if (access.masterToken) console.log('Master access token ready');
+  })
+  .catch((error) => {
+    console.error('ensure_access_error', error);
+  });
 await ensureDemoWorks(worksFile, dataDir, distDir)
   .then((result) => {
     if (result?.changed) console.log('Demo gallery photos restored into works.json');
@@ -886,8 +1075,11 @@ await ensureDemoWorks(worksFile, dataDir, distDir)
 
 app.listen(port, () => {
   console.log(`Svetlana cleaning server listening on http://localhost:${port}`);
-  if (!masterToken) {
-    console.warn('MASTER_TOKEN is not set — protected write routes will return 503');
+  if (!masterTokenEnv) {
+    console.warn('MASTER_TOKEN is not set — protected write routes will return 503 until access.json has a token');
+  }
+  if (!adminPassword) {
+    console.warn('ADMIN_PASSWORD is not set — /admin will return 503');
   }
   if (!apkDownloadPin) {
     console.warn('APK_DOWNLOAD_PIN is not set — /app-download will return 503');

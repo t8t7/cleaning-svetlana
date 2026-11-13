@@ -22,9 +22,11 @@ import {
   fetchWorks,
   pingServer,
   saveAvailability,
+  syncDevice,
   updateWorkCaption,
   uploadWork,
 } from './src/api';
+import { getDeviceId, getDeviceProfile } from './src/device';
 import {
   downloadAndInstallApk,
   fetchAppVersion,
@@ -81,6 +83,9 @@ export default function App() {
   const [editWork, setEditWork] = useState<WorkItem | null>(null);
   const [editCaption, setEditCaption] = useState('');
   const [editSaving, setEditSaving] = useState(false);
+  const [deviceBlocked, setDeviceBlocked] = useState(false);
+  const [deviceLabel, setDeviceLabel] = useState('');
+  const [deviceInfoLine, setDeviceInfoLine] = useState('');
   const [remoteVersion, setRemoteVersion] = useState<AppVersionInfo | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInstalling, setUpdateInstalling] = useState(false);
@@ -182,8 +187,52 @@ export default function App() {
       const loaded = await loadSettings();
       setSettings(loaded);
       setDraftSettings(loaded);
+      try {
+        const id = await getDeviceId();
+        const profile = getDeviceProfile();
+        setDeviceInfoLine(`${profile.name} · ${id.slice(0, 12)}…`);
+      } catch {
+        /* ignore */
+      }
     })();
   }, []);
+
+  const runDeviceSync = useCallback(async () => {
+    if (!settings.serverUrl.trim() || !settings.masterToken.trim()) return;
+    try {
+      const result = await syncDevice(settings.serverUrl, settings.masterToken);
+      setDeviceBlocked(false);
+      setDeviceLabel(result.device?.label || '');
+      if (result.masterToken && result.masterToken !== settings.masterToken) {
+        const next = { ...settings, masterToken: result.masterToken };
+        setSettings(next);
+        setDraftSettings((prev) => ({ ...prev, masterToken: result.masterToken }));
+        await saveSettings(next);
+        showToast('Токен обновлён с сервера');
+      }
+    } catch (error) {
+      const blocked = Boolean((error as { blocked?: boolean })?.blocked);
+      if (blocked) {
+        setDeviceBlocked(true);
+        showToast('Это устройство заблокировано', 'err');
+      }
+    }
+  }, [settings, showToast]);
+
+  useEffect(() => {
+    if (!settings.serverUrl.trim() || !settings.masterToken.trim()) return;
+    runDeviceSync();
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') runDeviceSync();
+    }, 20000);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') runDeviceSync();
+    });
+    return () => {
+      clearInterval(timer);
+      sub.remove();
+    };
+  }, [runDeviceSync, settings.masterToken, settings.serverUrl]);
 
   useEffect(() => {
     refresh();
@@ -390,6 +439,11 @@ export default function App() {
       <View style={styles.header}>
         <Text style={styles.brand}>Светлана</Text>
         <Text style={styles.subtitle}>График, цены и фото</Text>
+        {deviceBlocked ? (
+          <Text style={styles.blockedBanner}>
+            Это устройство заблокировано в админке. Управление сайтом недоступно.
+          </Text>
+        ) : null}
       </View>
 
       <View style={styles.tabs}>
@@ -647,6 +701,13 @@ export default function App() {
             </Pressable>
           </View>
 
+          <Text style={styles.sectionLabel}>Это устройство</Text>
+          <Text style={styles.hint}>
+            {deviceInfoLine || 'Определяется…'}
+            {deviceLabel ? ` · метка: ${deviceLabel}` : ''}
+            {deviceBlocked ? ' · ЗАБЛОКИРОВАНО' : ''}
+          </Text>
+
           <Text style={styles.sectionLabel}>Версия приложения</Text>
           <Text style={styles.hint}>
             Сейчас установлена {localAppVersion.versionName} (код {localAppVersion.versionCode})
@@ -750,6 +811,16 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 8 },
   brand: { fontSize: 28, fontWeight: '800', color: '#115e59' },
   subtitle: { color: '#64748b', marginTop: 2 },
+  blockedBanner: {
+    marginTop: 10,
+    backgroundColor: '#9f1239',
+    color: '#fff',
+    fontWeight: '700',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    overflow: 'hidden',
+  },
   toast: {
     position: 'absolute',
     left: 16,

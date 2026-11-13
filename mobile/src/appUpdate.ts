@@ -2,6 +2,7 @@ import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { Platform } from 'react-native';
+import { buildDeviceHeaders } from './device';
 import type { AppVersionInfo } from './types';
 
 function apiBase(serverUrl: string): string {
@@ -49,10 +50,12 @@ export async function downloadAndInstallApk(serverUrl: string, token: string, do
 
   const path = downloadPath.startsWith('/') ? downloadPath : `/${downloadPath}`;
   const target = `${FileSystem.cacheDirectory || ''}svetlana-schedule-update.apk`;
+  const deviceHeaders = await buildDeviceHeaders();
   const result = await FileSystem.downloadAsync(`${apiBase(serverUrl)}${path}`, target, {
     headers: {
       Accept: 'application/vnd.android.package-archive',
       Authorization: `Bearer ${token.trim()}`,
+      ...deviceHeaders,
     },
   });
 

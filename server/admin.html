@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Админка — Светлана</title>
+  <style>
+    :root {
+      --bg: #0b1f1c;
+      --panel: #12312c;
+      --card: #184039;
+      --line: #2a5c52;
+      --text: #ecfdf5;
+      --muted: #9cb9b2;
+      --accent: #34d399;
+      --warn: #fbbf24;
+      --danger: #fb7185;
+      --ok: #6ee7b7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: radial-gradient(1200px 600px at 10% -10%, #14534a, transparent), var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 1.25rem; }
+    h1 { margin: 0 0 0.25rem; font-size: 1.6rem; }
+    h2 { margin: 0 0 0.75rem; font-size: 1.15rem; }
+    .muted { color: var(--muted); }
+    .top {
+      display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start;
+      margin-bottom: 1.25rem; flex-wrap: wrap;
+    }
+    .panel {
+      background: color-mix(in srgb, var(--panel) 92%, black);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+    .grid {
+      display: grid;
+      gap: 0.85rem;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 0.9rem;
+    }
+    .card.blocked { border-color: var(--danger); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 40%, transparent); }
+    .row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+    .grow { flex: 1 1 140px; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.35rem; }
+    input {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #0f2925;
+      color: var(--text);
+      padding: 0.65rem 0.75rem;
+    }
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 0.6rem 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+      background: var(--accent);
+      color: #042f2e;
+    }
+    button.secondary { background: #234e47; color: var(--text); }
+    button.danger { background: #9f1239; color: #fff; }
+    button.warn { background: var(--warn); color: #422006; }
+    button:disabled { opacity: 0.55; cursor: default; }
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 0.15rem 0.55rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      background: #065f46;
+      color: var(--ok);
+    }
+    .badge.bad { background: #9f1239; color: #fecdd3; }
+    .mono { font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem; word-break: break-all; }
+    .toast {
+      position: fixed; right: 1rem; bottom: 1rem; max-width: 360px;
+      background: #064e3b; color: #ecfdf5; padding: 0.85rem 1rem; border-radius: 12px;
+      border: 1px solid #10b981; display: none; z-index: 20;
+    }
+    .toast.err { background: #7f1d1d; border-color: #fb7185; }
+    .login-box { max-width: 420px; margin: 12vh auto; }
+    .hidden { display: none !important; }
+    .meta { font-size: 0.85rem; color: var(--muted); line-height: 1.45; }
+    .token-box {
+      margin-top: 0.75rem; padding: 0.75rem; border-radius: 12px;
+      background: #052e29; border: 1px dashed #34d399;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section id="loginView" class="panel login-box">
+      <h1>Админка</h1>
+      <p class="muted">Управление доступом хозяина и устройствами APK.</p>
+      <label for="password">Пароль администратора</label>
+      <input id="password" type="password" autocomplete="current-password" />
+      <div class="row" style="margin-top:0.75rem">
+        <button id="loginBtn" type="button">Войти</button>
+      </div>
+      <p id="loginError" class="meta" style="color:var(--danger);margin-top:0.75rem"></p>
+    </section>
+
+    <section id="appView" class="hidden">
+      <div class="top">
+        <div>
+          <h1>Панель управления</h1>
+          <p class="muted">Устройства APK, блокировка и смена токена хозяина.</p>
+        </div>
+        <div class="row">
+          <button class="secondary" id="refreshBtn" type="button">Обновить</button>
+          <button class="secondary" id="logoutBtn" type="button">Выйти</button>
+        </div>
+      </div>
+
+      <section class="panel">
+        <h2>Доступ хозяина</h2>
+        <p class="meta" id="accessMeta">Загрузка…</p>
+        <div class="row" style="margin-top:0.75rem">
+          <button class="warn" id="rotateBtn" type="button">Сгенерировать новый токен</button>
+        </div>
+        <div id="tokenResult" class="token-box hidden">
+          <div class="meta">Новый токен уже на сервере. Разрешённые телефоны подхватят его сами (обычно до минуты).</div>
+          <div class="mono" id="tokenValue" style="margin-top:0.5rem"></div>
+          <div class="row" style="margin-top:0.6rem">
+            <button class="secondary" id="copyTokenBtn" type="button">Скопировать</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="row" style="justify-content:space-between;margin-bottom:0.5rem">
+          <h2 style="margin:0">Устройства</h2>
+          <span class="badge" id="deviceCount">0</span>
+        </div>
+        <p class="meta">Имя с телефона приходит само. Рядом можешь написать метку вроде «Светлана» или «неизвестный» и сразу заблокировать.</p>
+        <div id="devices" class="grid" style="margin-top:0.85rem"></div>
+      </section>
+    </section>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const loginView = document.getElementById('loginView');
+    const appView = document.getElementById('appView');
+    const loginError = document.getElementById('loginError');
+    const devicesEl = document.getElementById('devices');
+    const accessMeta = document.getElementById('accessMeta');
+    const deviceCount = document.getElementById('deviceCount');
+    const tokenResult = document.getElementById('tokenResult');
+    const tokenValue = document.getElementById('tokenValue');
+    const toastEl = document.getElementById('toast');
+
+    const toast = (text, err = false) => {
+      toastEl.textContent = text;
+      toastEl.classList.toggle('err', err);
+      toastEl.style.display = 'block';
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(() => { toastEl.style.display = 'none'; }, 3200);
+    };
+
+    const api = async (url, options = {}) => {
+      const res = await fetch(url, {
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+          ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+          ...(options.headers || {}),
+        },
+        ...options,
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const error = new Error(body.error || `Ошибка ${res.status}`);
+        error.status = res.status;
+        throw error;
+      }
+      return body;
+    };
+
+    const fmt = (value) => {
+      if (!value) return '—';
+      try {
+        return new Date(value).toLocaleString('ru-RU');
+      } catch {
+        return value;
+      }
+    };
+
+    const renderDevices = (items) => {
+      deviceCount.textContent = String(items.length);
+      if (!items.length) {
+        devicesEl.innerHTML = '<div class="card meta">Пока никто не подключался с APK.</div>';
+        return;
+      }
+      devicesEl.innerHTML = items.map((item) => {
+        const title = item.label || item.name || item.model || item.id;
+        return `
+          <article class="card ${item.blocked ? 'blocked' : ''}" data-id="${item.id}">
+            <div class="row" style="justify-content:space-between">
+              <strong>${escapeHtml(title)}</strong>
+              <span class="badge ${item.blocked ? 'bad' : ''}">${item.blocked ? 'Блок' : 'ОК'}</span>
+            </div>
+            <div class="meta" style="margin-top:0.45rem">
+              ID: <span class="mono">${escapeHtml(item.id)}</span><br/>
+              Телефон: ${escapeHtml(item.name || '—')} · ${escapeHtml(item.model || '—')}<br/>
+              Платформа: ${escapeHtml(item.platform || '—')} · app ${escapeHtml(item.appVersion || '—')}<br/>
+              Последний вход: ${escapeHtml(fmt(item.lastSeenAt))}<br/>
+              IP: ${escapeHtml(item.lastIp || '—')}
+            </div>
+            <label style="margin-top:0.7rem" for="label-${escapeHtml(item.id)}">Метка</label>
+            <input id="label-${escapeHtml(item.id)}" data-label-input value="${escapeHtml(item.label || '')}" placeholder="Светлана / неизвестный" />
+            <div class="row" style="margin-top:0.65rem">
+              <button class="secondary" data-save-label type="button">Сохранить метку</button>
+              <button class="${item.blocked ? 'secondary' : 'danger'}" data-toggle-block type="button">
+                ${item.blocked ? 'Разблокировать' : 'В блок'}
+              </button>
+              <button class="secondary" data-remove type="button">Убрать из списка</button>
+            </div>
+          </article>
+        `;
+      }).join('');
+    };
+
+    const escapeHtml = (value) => String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+    const refresh = async () => {
+      const data = await api('/admin/api/overview');
+      accessMeta.textContent =
+        `Версия токена: ${data.access.tokenVersion}. Обновлён: ${fmt(data.access.updatedAt)}.` +
+        (data.access.hasPreviousGrace
+          ? ` Старый токен ещё действует до ${fmt(data.access.previousValidUntil)} — чтобы телефоны успели обновиться.`
+          : '');
+      renderDevices(data.devices || []);
+    };
+
+    const showApp = async () => {
+      loginView.classList.add('hidden');
+      appView.classList.remove('hidden');
+      await refresh();
+    };
+
+    document.getElementById('loginBtn').addEventListener('click', async () => {
+      loginError.textContent = '';
+      try {
+        await api('/admin/api/login', {
+          method: 'POST',
+          body: JSON.stringify({ password: document.getElementById('password').value }),
+        });
+        await showApp();
+      } catch (error) {
+        loginError.textContent = error.message || 'Не удалось войти';
+      }
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await api('/admin/api/logout', { method: 'POST' });
+      appView.classList.add('hidden');
+      loginView.classList.remove('hidden');
+    });
+
+    document.getElementById('refreshBtn').addEventListener('click', async () => {
+      try {
+        await refresh();
+        toast('Обновлено');
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+
+    document.getElementById('rotateBtn').addEventListener('click', async () => {
+      if (!confirm('Сгенерировать новый токен? Старый ещё немного поживёт, чтобы телефон хозяина успел его сменить сам.')) return;
+      try {
+        const data = await api('/admin/api/token/rotate', { method: 'POST' });
+        tokenValue.textContent = data.masterToken || '';
+        tokenResult.classList.remove('hidden');
+        await refresh();
+        toast('Новый токен создан и ждёт телефоны');
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+
+    document.getElementById('copyTokenBtn').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(tokenValue.textContent || '');
+        toast('Скопировано');
+      } catch {
+        toast('Не удалось скопировать', true);
+      }
+    });
+
+    devicesEl.addEventListener('click', async (event) => {
+      const card = event.target.closest('[data-id]');
+      if (!card) return;
+      const id = card.getAttribute('data-id');
+      try {
+        if (event.target.matches('[data-save-label]')) {
+          const label = card.querySelector('[data-label-input]')?.value || '';
+          await api(`/admin/api/devices/${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ label }),
+          });
+          await refresh();
+          toast('Метка сохранена');
+        }
+        if (event.target.matches('[data-toggle-block]')) {
+          const blocked = event.target.textContent.includes('В блок');
+          await api(`/admin/api/devices/${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ blocked }),
+          });
+          await refresh();
+          toast(blocked ? 'Устройство в блоке' : 'Устройство разблокировано');
+        }
+        if (event.target.matches('[data-remove]')) {
+          if (!confirm('Убрать устройство из списка?')) return;
+          await api(`/admin/api/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+          await refresh();
+          toast('Убрано из списка');
+        }
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+
+    api('/admin/api/overview')
+      .then(showApp)
+      .catch(() => {
+        /* stay on login */
+      });
+  </script>
+</body>
+</html>
