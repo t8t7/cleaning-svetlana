@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -10,6 +11,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StatusBar as RNStatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -56,11 +58,15 @@ const TOAST_MS = 4200;
 const UPDATE_POLL_MS = 20_000;
 /** Don't spam the version endpoint on rapid focus events. */
 const UPDATE_MIN_GAP_MS = 8_000;
-/** System bars already inset the window; only a small header gap + toast lift. */
-const TOP_PAD = Platform.OS === 'android' ? 6 : 12;
-const TOAST_BOTTOM = Platform.OS === 'android' ? 16 : 12;
-
 export default function App() {
+  // Edge-to-edge + real status-bar height (Infinix/Tecno often ignore decor-fits).
+  const topPad =
+    Math.max(
+      Platform.OS === 'android' ? RNStatusBar.currentHeight || 0 : 0,
+      Constants.statusBarHeight || 0,
+      24
+    ) + 6;
+  const bottomPad = Platform.OS === 'android' ? 28 : 16;
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const appStateRef = useRef(AppState.currentState);
   const lastUpdateCheckAt = useRef(0);
@@ -445,8 +451,8 @@ export default function App() {
   };
 
   return (
-    <View style={[styles.safe, { paddingTop: TOP_PAD }]}>
-      <StatusBar style="dark" />
+    <View style={[styles.safe, { paddingTop: topPad, paddingBottom: bottomPad }]}>
+      <StatusBar style="dark" translucent />
       <View style={styles.header}>
         <Text style={styles.brand}>Светлана</Text>
         <Text style={styles.subtitle}>График, цены и фото</Text>
@@ -840,7 +846,7 @@ export default function App() {
           style={[
             styles.toast,
             toast.kind === 'err' ? styles.toastErr : styles.toastOk,
-            { bottom: TOAST_BOTTOM },
+            { bottom: 16 },
           ]}
         >
           <Text style={styles.toastText}>{toast.text}</Text>
