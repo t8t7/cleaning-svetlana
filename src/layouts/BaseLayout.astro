@@ -12,7 +12,7 @@ interface Props {
 
 const {
   title = `${site.brand} — уборка квартир в ${site.city} с заботой`,
-  description = `${site.slogan}. Генеральная, после ремонта, поддерживающая и мойка окон в ${site.city}. Свои средства, парогенератор в стоимости, выезд в день заказа. Рейтинг ${site.rating} · ${site.reviewCount} отзывов.`,
+  description = `Уборка квартир в ${site.city.replace(/а$/, 'е')} от ${site.brand}: генеральная, после ремонта, поддерживающая, мойка окон. Выезд в день заказа.`,
   canonical = site.url + '/',
   ogImage = site.url + '/og-image.jpg',
   jsonLd = [],

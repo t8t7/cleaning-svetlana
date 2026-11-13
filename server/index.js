@@ -60,6 +60,19 @@ const apkDownloadPin = String(process.env.APK_DOWNLOAD_PIN || '').trim();
 
 const app = express();
 app.set('trust proxy', 1);
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self'; object-src 'none'"
+  );
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  // HSTS is meaningful only behind HTTPS (Caddy). Harmless on plain HTTP for crawlers checking the header.
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  next();
+});
 app.use(express.json({ limit: '32kb' }));
 app.use(express.urlencoded({ extended: false, limit: '4kb' }));
 
@@ -289,6 +302,84 @@ function broadcastPricingEvent(event, payload) {
   broadcastToClients(pricingStreamClients, event, payload);
 }
 
+/** Keep shared ids in sync between price list and service cards (e.g. general, windows). */
+async function syncPricesFromServices(serviceData) {
+  const prices = await readPrices(pricesFile);
+  let changed = false;
+  const byId = new Map((serviceData.items || []).map((item) => [item.id, item]));
+
+  const items = (prices.items || []).map((row) => {
+    const svc = byId.get(row.id);
+    if (!svc) return row;
+    if (svc.unit === 'request') return row;
+    const next = {
+      ...row,
+      price: Math.round(Number(svc.price) || 0),
+      priceFrom: svc.priceFrom !== false,
+      unit: svc.unit === 'm2' ? 'm2' : 'fixed',
+      durationMinutes:
+        svc.durationMinutes == null ? row.durationMinutes : Math.round(Number(svc.durationMinutes) || 0),
+    };
+    if (
+      next.price !== row.price ||
+      next.priceFrom !== row.priceFrom ||
+      next.unit !== row.unit ||
+      next.durationMinutes !== row.durationMinutes
+    ) {
+      changed = true;
+    }
+    return next;
+  });
+
+  if (!changed) return null;
+  const payload = {
+    meta: {
+      ...prices.meta,
+      updatedAt: new Date().toISOString(),
+    },
+    items,
+  };
+  await writePricesAtomic(pricesFile, payload);
+  return payload;
+}
+
+async function syncServicesFromPrices(priceData) {
+  const services = await readServiceCards(serviceCardsFile);
+  let changed = false;
+  const byId = new Map((priceData.items || []).map((item) => [item.id, item]));
+
+  const items = (services.items || []).map((row) => {
+    const price = byId.get(row.id);
+    if (!price || price.enabled === false) return row;
+    if (row.unit === 'request') return row;
+    const nextUnit = price.unit === 'm2' ? 'm2' : 'fixed';
+    const next = {
+      ...row,
+      price: Math.round(Number(price.price) || 0),
+      priceFrom: price.priceFrom !== false,
+      unit: nextUnit,
+      durationMinutes: Math.round(Number(price.durationMinutes) || 0),
+    };
+    if (
+      next.price !== row.price ||
+      next.priceFrom !== row.priceFrom ||
+      next.unit !== row.unit ||
+      next.durationMinutes !== row.durationMinutes
+    ) {
+      changed = true;
+    }
+    return next;
+  });
+
+  if (!changed) return null;
+  const payload = {
+    meta: { updatedAt: new Date().toISOString() },
+    items,
+  };
+  await writeServiceCardsAtomic(serviceCardsFile, payload);
+  return payload;
+}
+
 async function loadAvailabilityPayload() {
   const data = await readAvailability(availabilityFile);
   const live = getLiveStatus(data.weekPlan);
@@ -415,8 +506,12 @@ app.put('/api/prices', pricesWriteLimiter, async (req, res) => {
     }
 
     await writePricesAtomic(pricesFile, checked.data);
+    const syncedServices = await syncServicesFromPrices(checked.data);
     const publicPayload = publicPrices(checked.data);
     broadcastPricingEvent('prices', publicPayload);
+    if (syncedServices) {
+      broadcastPricingEvent('services', publicServiceCards(syncedServices));
+    }
     res.set('Cache-Control', 'no-store');
     return res.json({ ok: true, ...managePrices(checked.data) });
   } catch (error) {
@@ -516,8 +611,12 @@ app.put('/api/services', pricesWriteLimiter, async (req, res) => {
     }
 
     await writeServiceCardsAtomic(serviceCardsFile, checked.data);
+    const syncedPrices = await syncPricesFromServices(checked.data);
     const publicPayload = publicServiceCards(checked.data);
     broadcastPricingEvent('services', publicPayload);
+    if (syncedPrices) {
+      broadcastPricingEvent('prices', publicPrices(syncedPrices));
+    }
     res.set('Cache-Control', 'no-store');
     return res.json({ ok: true, ...publicPayload });
   } catch (error) {

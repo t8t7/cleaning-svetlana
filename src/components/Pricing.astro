@@ -112,8 +112,9 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
   };
 
   const renderPrices = (payload) => {
-    if (!table || !Array.isArray(payload?.items) || !payload.items.length) return;
+    if (!table || !Array.isArray(payload?.items)) return;
     if (noteEl && payload.meta?.note) noteEl.textContent = payload.meta.note;
+    // Empty list must clear the table (deleted rows must disappear).
     table.innerHTML = payload.items.map(rowHtml).join('');
   };
 
@@ -125,12 +126,12 @@ const initialItems = priceItems.filter((item) => item.enabled !== false).map(pre
   };
 
   const loadPrices = () =>
-    fetch('/api/prices', { headers: { Accept: 'application/json' } })
+    fetch('/api/prices', { headers: { Accept: 'application/json' }, cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
       .then(renderPrices);
 
   const loadCalculator = () =>
-    fetch('/api/calculator', { headers: { Accept: 'application/json' } })
+    fetch('/api/calculator', { headers: { Accept: 'application/json' }, cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
       .then(applyCalculator);
 
