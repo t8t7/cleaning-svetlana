@@ -341,12 +341,20 @@ async function readAppVersion() {
   };
 }
 
-function sendApkFile(res) {
+function sendApkFile(res, { asJsonError = true } = {}) {
   res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-  return res.download(apkFile, 'svetlana-schedule.apk', (err) => {
+  res.setHeader('Content-Disposition', 'attachment; filename="svetlana-schedule.apk"');
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Cache-Control', 'private, no-store');
+  // Prefer sendFile (kernel sendfile) over buffering the whole APK in Node.
+  return res.sendFile(apkFile, (err) => {
     if (err && !res.headersSent) {
       console.error('apk_download_error', err);
-      res.status(500).json({ error: 'Не удалось отдать APK' });
+      if (asJsonError) {
+        res.status(500).json({ error: 'Не удалось отдать APK' });
+      } else {
+        res.status(500).type('html').send(renderApkDownloadPage({ error: 'Не удалось отдать APK.' }));
+      }
     }
   });
 }
@@ -1021,13 +1029,7 @@ app.post('/app-download', apkDownloadLimiter, async (req, res) => {
       .send(renderApkDownloadPage({ error: 'APK ещё не загружен на сервер.' }));
   }
 
-  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-  return res.download(apkFile, 'svetlana-schedule.apk', (err) => {
-    if (err && !res.headersSent) {
-      console.error('apk_download_error', err);
-      res.status(500).type('html').send(renderApkDownloadPage({ error: 'Не удалось отдать APK.' }));
-    }
-  });
+  return sendApkFile(res, { asJsonError: false });
 });
 
 

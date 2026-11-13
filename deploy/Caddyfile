@@ -13,9 +13,17 @@ test-fas.ru {
 		-Server
 	}
 
-	# SSE must bypass gzip and flush immediately (availability + prices).
-	@sseStreams path /api/availability/stream /api/pricing/stream
+	# SSE must bypass gzip and flush immediately (availability + prices + works).
+	@sseStreams path /api/availability/stream /api/pricing/stream /api/works/stream
 	handle @sseStreams {
+		reverse_proxy 127.0.0.1:3000 {
+			flush_interval -1
+		}
+	}
+
+	# APK is already compressed — never gzip/zstd it (re-compressing makes downloads much slower).
+	@apkDownload path /api/app-apk /app-download /cdn/apk
+	handle @apkDownload {
 		reverse_proxy 127.0.0.1:3000 {
 			flush_interval -1
 		}
