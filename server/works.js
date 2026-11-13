@@ -24,10 +24,91 @@ export function publicWork(item) {
   };
 }
 
+/** Newest first — top-left of the site grid, then right/down like a snake. */
+export function sortWorksNewestFirst(items) {
+  return [...(items || [])].sort((a, b) => {
+    const tb = Date.parse(b?.createdAt || '') || 0;
+    const ta = Date.parse(a?.createdAt || '') || 0;
+    if (tb !== ta) return tb - ta;
+    return String(b?.id || '').localeCompare(String(a?.id || ''));
+  });
+}
+
 export async function ensureWorksDirs(dataDir) {
   const uploadsDir = path.join(dataDir, 'uploads', 'works');
   await fs.mkdir(uploadsDir, { recursive: true });
   return uploadsDir;
+}
+
+const DEMO_WORKS = [
+  {
+    id: 'demo-kitchen',
+    src: 'result-kitchen-detail.jpg',
+    filename: 'demo-kitchen.jpg',
+    caption: 'Кухня после генеральной уборки',
+    createdAt: '2026-11-11T12:00:00.000Z',
+  },
+  {
+    id: 'demo-after-kitchen',
+    src: 'after-kitchen.jpg',
+    filename: 'demo-after-kitchen.jpg',
+    caption: 'Чистая кухня — готово к жизни',
+    createdAt: '2026-11-11T12:00:00.000Z',
+  },
+  {
+    id: 'demo-window',
+    src: 'after-window.jpg',
+    filename: 'demo-window.jpg',
+    caption: 'Окна без разводов',
+    createdAt: '2026-11-11T12:00:00.000Z',
+  },
+];
+
+/** Re-seed built-in demo shots if they disappeared from works.json. */
+export async function ensureDemoWorks(worksFilePath, dataDir, distDir) {
+  const uploadsDir = await ensureWorksDirs(dataDir);
+  const data = await readWorks(worksFilePath);
+  const byId = new Map(data.items.map((item) => [item.id, item]));
+  let changed = false;
+  const srcRoot = path.join(distDir, 'images', 'works');
+
+  for (const demo of DEMO_WORKS) {
+    const target = path.join(uploadsDir, demo.filename);
+    try {
+      await fs.access(target);
+    } catch {
+      try {
+        await fs.copyFile(path.join(srcRoot, demo.src), target);
+      } catch (error) {
+        console.error('demo_work_copy_error', demo.id, error);
+        continue;
+      }
+    }
+
+    if (!byId.has(demo.id)) {
+      byId.set(demo.id, {
+        id: demo.id,
+        filename: demo.filename,
+        thumbFilename: demo.filename,
+        url: `/uploads/works/${demo.filename}`,
+        thumbUrl: `/uploads/works/${demo.filename}`,
+        caption: demo.caption,
+        createdAt: demo.createdAt,
+        ratingSum: 0,
+        ratingCount: 0,
+      });
+      changed = true;
+    }
+  }
+
+  const ordered = sortWorksNewestFirst([...byId.values()]);
+  const sameOrder =
+    ordered.length === data.items.length &&
+    ordered.every((item, index) => item.id === data.items[index]?.id);
+  if (!changed && sameOrder) return { items: data.items, changed: false };
+
+  await writeWorksAtomic(worksFilePath, { items: ordered });
+  return { items: ordered, changed: true };
 }
 
 export async function readWorks(filePath) {
@@ -35,7 +116,7 @@ export async function readWorks(filePath) {
     const raw = await fs.readFile(filePath, 'utf8');
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed.items)) return { items: [] };
-    return { items: parsed.items };
+    return { items: sortWorksNewestFirst(parsed.items) };
   } catch {
     return { items: [] };
   }
@@ -145,7 +226,7 @@ export async function addWork(filePath, uploadsDir, file, caption) {
     thumbFilename: stored.thumbFilename,
     caption,
   });
-  data.items.unshift(item);
+  data.items = sortWorksNewestFirst([item, ...data.items]);
   await writeWorksAtomic(filePath, data);
   return { ok: true, item: publicWork(item) };
 }

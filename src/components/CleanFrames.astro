@@ -1,7 +1,8 @@
 ---
 import { site } from '../data/site.js';
 
-const PREVIEW_LIMIT = 6;
+const PREVIEW_MOBILE = 4;
+const PREVIEW_DESKTOP = 6;
 
 const fallbackItems = [
   {
@@ -25,7 +26,13 @@ const fallbackItems = [
 ];
 ---
 
-<section class="section clean-frames" id="frames" aria-labelledby="frames-title" data-preview-limit={PREVIEW_LIMIT}>
+<section
+  class="section clean-frames"
+  id="frames"
+  aria-labelledby="frames-title"
+  data-preview-mobile={PREVIEW_MOBILE}
+  data-preview-desktop={PREVIEW_DESKTOP}
+>
   <div class="container">
     <div class="section-head reveal">
       <span class="eyebrow">Галерея</span>
@@ -34,7 +41,7 @@ const fallbackItems = [
     </div>
 
     <div class="frames-grid" data-frames-grid>
-      {fallbackItems.slice(0, PREVIEW_LIMIT).map((item, index) => (
+      {fallbackItems.slice(0, PREVIEW_MOBILE).map((item, index) => (
         <article class="frame-card reveal" data-frame-id={item.id}>
           <button
             type="button"
@@ -91,10 +98,15 @@ const fallbackItems = [
   const closeBtn = document.querySelector('[data-close-frame]');
   const prevBtn = document.querySelector('[data-frame-prev]');
   const nextBtn = document.querySelector('[data-frame-next]');
-  const previewLimit = Number(section?.getAttribute('data-preview-limit') || 6);
+  const previewMobile = Number(section?.getAttribute('data-preview-mobile') || 4);
+  const previewDesktop = Number(section?.getAttribute('data-preview-desktop') || 6);
+  const desktopQuery = window.matchMedia('(min-width: 700px)');
+
+  const getPreviewLimit = () => (desktopQuery.matches ? previewDesktop : previewMobile);
 
   let items = [];
   let currentIndex = 0;
+  let lastPreviewLimit = getPreviewLimit();
   let touchStartX = 0;
   let touchDeltaX = 0;
   const prefetchedUrls = new Set();
@@ -161,6 +173,9 @@ const fallbackItems = [
   const renderPreview = (list) => {
     items = Array.isArray(list) ? list : [];
     if (!grid) return;
+    const previewLimit = getPreviewLimit();
+    lastPreviewLimit = previewLimit;
+    // Only the newest N cards stay on the page; the rest open via the button.
     const preview = items.slice(0, previewLimit);
     grid.innerHTML = preview.map((item, index) => cardHtml(item, index)).join('');
     bindGrid();
@@ -235,32 +250,99 @@ const fallbackItems = [
       url: '/images/works/result-kitchen-detail.jpg',
       thumbUrl: '/images/works/result-kitchen-detail.jpg',
       caption: 'Кухня после генеральной уборки',
+      createdAt: '2026-11-11T12:00:00.000Z',
     },
     {
       id: 'demo-after-kitchen',
       url: '/images/works/after-kitchen.jpg',
       thumbUrl: '/images/works/after-kitchen.jpg',
       caption: 'Чистая кухня — готово к жизни',
+      createdAt: '2026-11-11T12:00:01.000Z',
     },
     {
       id: 'demo-window',
       url: '/images/works/after-window.jpg',
       thumbUrl: '/images/works/after-window.jpg',
       caption: 'Окна без разводов',
+      createdAt: '2026-11-11T12:00:02.000Z',
     },
   ];
 
   renderPreview(demoItems);
 
-  fetch('/api/works', { headers: { Accept: 'application/json' } })
-    .then((res) => (res.ok ? res.json() : Promise.reject()))
-    .then((data) => {
-      if (!Array.isArray(data.items) || !data.items.length) return;
-      renderPreview(data.items);
-    })
-    .catch(() => {
-      /* keep demo fallback */
+  const sortNewestFirst = (list) =>
+    [...list].sort((a, b) => {
+      const tb = Date.parse(b?.createdAt || '') || 0;
+      const ta = Date.parse(a?.createdAt || '') || 0;
+      if (tb !== ta) return tb - ta;
+      return String(b?.id || '').localeCompare(String(a?.id || ''));
     });
+
+  const applyWorks = (payload) => {
+    const list = Array.isArray(payload?.items) ? payload.items : [];
+    // Keep demos in the portfolio even if they were dropped from the API store.
+    const byId = new Map(list.map((item) => [item.id, item]));
+    for (const demo of demoItems) {
+      if (!byId.has(demo.id)) byId.set(demo.id, demo);
+    }
+    // Newest → top-left, then right/down; overflow stays behind "Смотреть фото".
+    renderPreview(sortNewestFirst([...byId.values()]));
+  };
+
+  const loadWorks = () =>
+    fetch('/api/works', { headers: { Accept: 'application/json' }, cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then(applyWorks);
+
+  let worksPollTimer = null;
+
+  const startWorksPolling = () => {
+    if (worksPollTimer != null) return;
+    worksPollTimer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      loadWorks().catch(() => {});
+    }, 1000);
+  };
+
+  const stopWorksPolling = () => {
+    if (worksPollTimer == null) return;
+    window.clearInterval(worksPollTimer);
+    worksPollTimer = null;
+  };
+
+  // Do not open EventSource for /api/works/stream until system Caddy flushes it.
+  // A buffered SSE holds a connection forever and can starve polling on mobile.
+
+  const refreshWorks = () => {
+    loadWorks().catch(() => {
+      /* keep current / demo gallery */
+    });
+  };
+
+  refreshWorks();
+  startWorksPolling();
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      refreshWorks();
+      startWorksPolling();
+    } else {
+      stopWorksPolling();
+    }
+  });
+  window.addEventListener('pageshow', refreshWorks);
+  window.addEventListener('focus', refreshWorks);
+
+  const onViewportChange = () => {
+    if (getPreviewLimit() === lastPreviewLimit) return;
+    renderPreview(items);
+  };
+  if (typeof desktopQuery.addEventListener === 'function') {
+    desktopQuery.addEventListener('change', onViewportChange);
+  } else if (typeof desktopQuery.addListener === 'function') {
+    desktopQuery.addListener(onViewportChange);
+  }
+  window.addEventListener('resize', onViewportChange);
 </script>
 
 <style>

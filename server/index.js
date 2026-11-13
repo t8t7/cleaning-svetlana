@@ -34,6 +34,7 @@ import {
 import {
   addWork,
   deleteWork,
+  ensureDemoWorks,
   ensureWorksDirs,
   publicWork,
   rateWork,
@@ -273,6 +274,7 @@ async function cleanupTemp(file) {
 
 const availabilityStreamClients = new Set();
 const pricingStreamClients = new Set();
+const worksStreamClients = new Set();
 
 function sendSseEvent(res, event, payload) {
   res.write(`event: ${event}\n`);
@@ -300,6 +302,14 @@ function broadcastAvailability(payload) {
 
 function broadcastPricingEvent(event, payload) {
   broadcastToClients(pricingStreamClients, event, payload);
+}
+
+async function broadcastWorks() {
+  const data = await readWorks(worksFile);
+  broadcastToClients(worksStreamClients, 'works', {
+    items: data.items.map(publicWork),
+    serverTime: new Date().toISOString(),
+  });
 }
 
 /** Keep shared ids in sync between price list and service cards (e.g. general, windows). */
@@ -504,6 +514,16 @@ app.put('/api/prices', pricesWriteLimiter, async (req, res) => {
     if (!checked.ok) {
       return res.status(400).json({ error: checked.error });
     }
+    if (!checked.data.items.length) {
+      return res.status(400).json({ error: 'Нельзя сохранить пустой прайс' });
+    }
+
+    // Keep previous copy so an accidental wipe can be recovered.
+    try {
+      await fs.copyFile(pricesFile, `${pricesFile}.bak`);
+    } catch {
+      /* first write / missing file */
+    }
 
     await writePricesAtomic(pricesFile, checked.data);
     const syncedServices = await syncServicesFromPrices(checked.data);
@@ -659,6 +679,7 @@ app.post('/api/works', worksWriteLimiter, (req, res) => {
         await cleanupTemp(req.file);
         return res.status(400).json({ error: result.error });
       }
+      await broadcastWorks();
       return res.status(201).json({ ok: true, item: result.item });
     } catch (error) {
       console.error('works_upload_error', error);
@@ -666,6 +687,40 @@ app.post('/api/works', worksWriteLimiter, (req, res) => {
       return res.status(500).json({ error: 'Не удалось сохранить фото' });
     }
   });
+});
+
+app.get('/api/works/stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+  worksStreamClients.add(res);
+  req.on('close', () => {
+    worksStreamClients.delete(res);
+  });
+
+  try {
+    const data = await readWorks(worksFile);
+    sendSseEvent(res, 'works', {
+      items: data.items.map(publicWork),
+      serverTime: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('works_stream_bootstrap_error', error);
+  }
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch {
+      clearInterval(heartbeat);
+      worksStreamClients.delete(res);
+    }
+  }, 25000);
+
+  req.on('close', () => clearInterval(heartbeat));
 });
 
 app.delete('/api/works/:id', worksWriteLimiter, async (req, res) => {
@@ -676,6 +731,7 @@ app.delete('/api/works/:id', worksWriteLimiter, async (req, res) => {
     if (!result.ok) {
       return res.status(result.status || 400).json({ error: result.error });
     }
+    await broadcastWorks();
     return res.json({ ok: true });
   } catch (error) {
     console.error('works_delete_error', error);
@@ -689,6 +745,7 @@ app.post('/api/works/:id/rate', rateLimiter, async (req, res) => {
     if (!result.ok) {
       return res.status(result.status || 400).json({ error: result.error });
     }
+    await broadcastWorks();
     return res.json({ ok: true, item: result.item });
   } catch (error) {
     console.error('works_rate_error', error);
@@ -799,6 +856,13 @@ app.use((req, res) => {
 });
 
 await ensureWorksDirs(dataDir).catch(() => {});
+await ensureDemoWorks(worksFile, dataDir, distDir)
+  .then((result) => {
+    if (result?.changed) console.log('Demo gallery photos restored into works.json');
+  })
+  .catch((error) => {
+    console.error('ensure_demo_works_error', error);
+  });
 
 app.listen(port, () => {
   console.log(`Svetlana cleaning server listening on http://localhost:${port}`);
