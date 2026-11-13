@@ -222,6 +222,9 @@ export function validatePricesPayload(body) {
   if (!Array.isArray(body.items)) {
     return { ok: false, error: 'Нужен массив items' };
   }
+  if (body.items.length < 1) {
+    return { ok: false, error: 'Нельзя сохранить пустой прайс' };
+  }
   if (body.items.length > 80) {
     return { ok: false, error: 'Слишком много позиций (макс. 80)' };
   }

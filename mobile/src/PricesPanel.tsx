@@ -1,58 +1,65 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import {
-  fetchCalculator,
-  fetchPrices,
-  fetchServices,
-  saveCalculator,
-  savePrices,
-  saveServices,
-} from './api';
-import type {
-  CalculatorRates,
-  PriceItem,
-  PriceUnit,
-  ServiceCardItem,
-  ServiceUnit,
-} from './types';
+import { fetchCalculator, fetchPrices, saveCalculator, savePrices } from './api';
+import type { CalcSizeKey, CalculatorItem, PriceItem, PriceUnit } from './types';
 
-type PricesSubTab = 'list' | 'services' | 'calc';
+type PricesSubTab = 'list' | 'calc';
 type ListFilter = 'all' | 'm2' | 'fixed';
 
-const SERVICE_TITLES: Record<ServiceCardItem['id'], string> = {
-  general: 'Генеральная уборка',
-  'after-repair': 'Уборка после ремонта',
-  maintain: 'Поддерживающая уборка',
-  windows: 'Мойка окон',
-};
-
-const CALC_TYPES: { key: keyof CalculatorRates; label: string }[] = [
-  { key: 'maintain', label: 'Поддерживающая' },
-  { key: 'general', label: 'Генеральная' },
-  { key: 'afterRepair', label: 'После ремонта' },
-];
-
-const CALC_SIZES: { key: keyof CalculatorRates['general']; label: string }[] = [
+const CALC_SIZES: { key: CalcSizeKey; label: string }[] = [
   { key: 'studio', label: 'Студия' },
   { key: 'one', label: '1-комн.' },
   { key: 'two', label: '2-комн.' },
   { key: 'three', label: '3+' },
 ];
 
-const EMPTY_RATES: CalculatorRates = {
-  maintain: { studio: 0, one: 0, two: 0, three: 0 },
-  general: { studio: 0, one: 0, two: 0, three: 0 },
-  afterRepair: { studio: 0, one: 0, two: 0, three: 0 },
+const EMPTY_SIZE_RATES = () => ({ studio: 0, one: 0, two: 0, three: 0 });
+
+const LEGACY_CALC_NAMES: Record<string, string> = {
+  maintain: 'Поддерживающая',
+  general: 'Генеральная',
+  afterRepair: 'После ремонта',
 };
+
+function normalizeCalcItems(payload: {
+  items?: CalculatorItem[];
+  rates?: Record<string, { studio?: number; one?: number; two?: number; three?: number }>;
+}): CalculatorItem[] {
+  if (Array.isArray(payload.items) && payload.items.length) {
+    return payload.items.map((item, index) => ({
+      id: item.id,
+      name: item.name || LEGACY_CALC_NAMES[item.id] || item.id,
+      sort: Number.isFinite(Number(item.sort)) ? Number(item.sort) : (index + 1) * 10,
+      enabled: item.enabled !== false,
+      rates: {
+        studio: Number(item.rates?.studio) || 0,
+        one: Number(item.rates?.one) || 0,
+        two: Number(item.rates?.two) || 0,
+        three: Number(item.rates?.three) || 0,
+      },
+    }));
+  }
+  const rates = payload.rates || {};
+  return Object.keys(rates).map((id, index) => ({
+    id,
+    name: LEGACY_CALC_NAMES[id] || id,
+    sort: (index + 1) * 10,
+    enabled: true,
+    rates: {
+      studio: Number(rates[id]?.studio) || 0,
+      one: Number(rates[id]?.one) || 0,
+      two: Number(rates[id]?.two) || 0,
+      three: Number(rates[id]?.three) || 0,
+    },
+  }));
+}
 
 type Props = {
   serverUrl: string;
@@ -70,17 +77,33 @@ function makePriceId(): string {
   return `item-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000)}`;
 }
 
+function makeCalcId(): string {
+  return `calc-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000)}`;
+}
+
 export function PricesPanel({ serverUrl, masterToken, onToast, onNeedSettings }: Props) {
   const [subTab, setSubTab] = useState<PricesSubTab>('list');
   const [listFilter, setListFilter] = useState<ListFilter>('all');
   const [loading, setLoading] = useState(true);
   const [savingPrices, setSavingPrices] = useState(false);
-  const [savingServices, setSavingServices] = useState(false);
   const [savingCalc, setSavingCalc] = useState(false);
   const [priceItems, setPriceItems] = useState<PriceItem[]>([]);
   const [priceNote, setPriceNote] = useState('');
-  const [serviceItems, setServiceItems] = useState<ServiceCardItem[]>([]);
-  const [calcRates, setCalcRates] = useState<CalculatorRates>(EMPTY_RATES);
+  const [calcItems, setCalcItems] = useState<CalculatorItem[]>([]);
+  const priceItemsRef = useRef<PriceItem[]>([]);
+  const priceNoteRef = useRef('');
+  const calcItemsRef = useRef<CalculatorItem[]>([]);
+  const pricesSaveLock = useRef(false);
+
+  useEffect(() => {
+    priceItemsRef.current = priceItems;
+  }, [priceItems]);
+  useEffect(() => {
+    priceNoteRef.current = priceNote;
+  }, [priceNote]);
+  useEffect(() => {
+    calcItemsRef.current = calcItems;
+  }, [calcItems]);
 
   const ensureToken = () => {
     if (!masterToken.trim()) {
@@ -91,40 +114,35 @@ export function PricesPanel({ serverUrl, masterToken, onToast, onNeedSettings }:
     return true;
   };
 
-  const refreshAll = useCallback(async () => {
+  const refreshAll = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!serverUrl.trim()) return;
-    setLoading(true);
+    const quiet = opts?.quiet === true;
+    // Full-screen spinner only for first open, never after save.
+    if (!quiet) setLoading(true);
     try {
-      const [prices, services, calc] = await Promise.all([
+      const [prices, calc] = await Promise.all([
         fetchPrices(serverUrl, masterToken),
-        fetchServices(serverUrl),
         fetchCalculator(serverUrl),
       ]);
-      setPriceItems(
-        (prices.items || []).map((item, index) => ({
-          ...item,
-          priceFrom: item.priceFrom !== false,
-          enabled: item.enabled !== false,
-          sort: Number.isFinite(Number(item.sort)) ? Number(item.sort) : (index + 1) * 10,
-          unit: item.unit === 'm2' ? 'm2' : 'fixed',
-        }))
-      );
-      setPriceNote(prices.meta?.note || '');
-      setServiceItems(
-        (services.items || []).map((item) => ({
-          ...item,
-          priceFrom: item.priceFrom !== false,
-          durationApprox: item.durationApprox === true,
-          durationText: item.durationText || '',
-          durationMinutes: item.durationMinutes ?? null,
-          durationMinutesMax: item.durationMinutesMax ?? null,
-        }))
-      );
-      if (calc.rates) setCalcRates(calc.rates);
+      const nextPrices = (prices.items || []).map((item, index) => ({
+        ...item,
+        priceFrom: item.priceFrom !== false,
+        enabled: item.enabled !== false,
+        sort: Number.isFinite(Number(item.sort)) ? Number(item.sort) : (index + 1) * 10,
+        unit: item.unit === 'm2' ? 'm2' : 'fixed' as const,
+      }));
+      priceItemsRef.current = nextPrices;
+      setPriceItems(nextPrices);
+      const note = prices.meta?.note || '';
+      priceNoteRef.current = note;
+      setPriceNote(note);
+      const nextCalc = normalizeCalcItems(calc);
+      calcItemsRef.current = nextCalc;
+      setCalcItems(nextCalc);
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Ошибка загрузки цен', 'err');
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, [masterToken, onToast, serverUrl]);
 
@@ -138,27 +156,112 @@ export function PricesPanel({ serverUrl, masterToken, onToast, onNeedSettings }:
   }, [listFilter, priceItems]);
 
   const patchPrice = (id: string, patch: Partial<PriceItem>) => {
-    setPriceItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+    const next = priceItemsRef.current.map((item) => (item.id === id ? { ...item, ...patch } : item));
+    priceItemsRef.current = next;
+    setPriceItems(next);
   };
 
-  const patchService = (id: ServiceCardItem['id'], patch: Partial<ServiceCardItem>) => {
-    setServiceItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  const togglePriceFlag = (id: string, patch: Partial<Pick<PriceItem, 'priceFrom' | 'enabled'>>) => {
+    const next = priceItemsRef.current.map((item) => (item.id === id ? { ...item, ...patch } : item));
+    priceItemsRef.current = next;
+    setPriceItems(next);
+
+    void (async () => {
+      if (!ensureToken()) return;
+      const empty = next.find((row) => !String(row.name || '').trim());
+      if (empty) {
+        onToast('Сначала укажите название услуги, потом тумблер', 'err');
+        return;
+      }
+      if (pricesSaveLock.current) {
+        onToast('Подождите, предыдущее сохранение ещё идёт', 'err');
+        return;
+      }
+      pricesSaveLock.current = true;
+      setSavingPrices(true);
+      try {
+        await savePrices(serverUrl, masterToken, next, priceNoteRef.current);
+        onToast(
+          patch.priceFrom === false
+            ? 'На сайте без «от»'
+            : patch.priceFrom === true
+              ? 'На сайте с «от»'
+              : patch.enabled === false
+                ? 'Убрано с сайта'
+                : 'Снова на сайте'
+        );
+      } catch (error) {
+        onToast(error instanceof Error ? error.message : 'Не удалось сохранить тумблер', 'err');
+        await refreshAll({ quiet: true });
+      } finally {
+        pricesSaveLock.current = false;
+        setSavingPrices(false);
+      }
+    })();
   };
 
-  const patchCalc = (
-    type: keyof CalculatorRates,
-    size: keyof CalculatorRates['general'],
-    value: string
-  ) => {
-    setCalcRates((prev) => ({
+  const patchCalcItem = (id: string, patch: Partial<CalculatorItem>) => {
+    setCalcItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  };
+
+  const patchCalcRate = (id: string, size: CalcSizeKey, value: string) => {
+    setCalcItems((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? { ...item, rates: { ...item.rates, [size]: parseNum(value) } }
+          : item
+      )
+    );
+  };
+
+  const onAddCalc = () => {
+    const nextSort =
+      calcItems.reduce((max, item) => Math.max(max, Number(item.sort) || 0), 0) + 10;
+    setCalcItems((prev) => [
       ...prev,
-      [type]: { ...prev[type], [size]: parseNum(value) },
-    }));
+      {
+        id: makeCalcId(),
+        name: '',
+        sort: nextSort,
+        enabled: true,
+        rates: EMPTY_SIZE_RATES(),
+      },
+    ]);
   };
 
-  const onAddPrice = (unit: PriceUnit) => {
+  const onDeleteCalc = (item: CalculatorItem) => {
+    const nextItems = calcItemsRef.current.filter((row) => row.id !== item.id);
+    if (nextItems.length < 1) {
+      onToast('В калькуляторе должна остаться хотя бы одна услуга', 'err');
+      return;
+    }
+    calcItemsRef.current = nextItems;
+    setCalcItems(nextItems);
+
+    void (async () => {
+      if (!ensureToken()) return;
+      const empty = nextItems.find((row) => !String(row.name || '').trim());
+      if (empty) {
+        onToast('Удалено в телефоне. Заполните названия и нажмите «Сохранить калькулятор»', 'err');
+        return;
+      }
+      setSavingCalc(true);
+      try {
+        await saveCalculator(serverUrl, masterToken, nextItems);
+        onToast('Сайт подтвердил: услуга убрана из калькулятора');
+      } catch (error) {
+        onToast(error instanceof Error ? error.message : 'Не удалось удалить на сайте', 'err');
+        await refreshAll({ quiet: true });
+      } finally {
+        setSavingCalc(false);
+      }
+    })();
+  };
+
+  const onAddPrice = () => {
     const nextSort =
       priceItems.reduce((max, item) => Math.max(max, Number(item.sort) || 0), 0) + 10;
+    const unit: PriceUnit = listFilter === 'm2' ? 'm2' : 'fixed';
     setPriceItems((prev) => [
       ...prev,
       {
@@ -172,69 +275,86 @@ export function PricesPanel({ serverUrl, masterToken, onToast, onNeedSettings }:
         enabled: true,
       },
     ]);
-    setListFilter(unit);
   };
 
-  const onDeletePrice = (item: PriceItem) => {
-    Alert.alert('Удалить позицию?', item.name || 'Без названия', [
-      { text: 'Отмена', style: 'cancel' },
-      {
-        text: 'Удалить',
-        style: 'destructive',
-        onPress: () => setPriceItems((prev) => prev.filter((row) => row.id !== item.id)),
-      },
-    ]);
-  };
-
-  const onSavePrices = async () => {
-    if (!ensureToken()) return;
-    const empty = priceItems.find((item) => !String(item.name || '').trim());
+  const persistPrices = async (items: PriceItem[], note: string, okMessage: string) => {
+    if (!ensureToken()) return false;
+    const empty = items.find((item) => !String(item.name || '').trim());
     if (empty) {
       onToast('У каждой позиции должно быть название', 'err');
-      return;
+      return false;
     }
     setSavingPrices(true);
     try {
-      const data = await savePrices(serverUrl, masterToken, priceItems, priceNote);
-      setPriceItems(
-        (data.items || priceItems).map((item, index) => ({
-          ...item,
-          priceFrom: item.priceFrom !== false,
-          enabled: item.enabled !== false,
-          sort: Number.isFinite(Number(item.sort)) ? Number(item.sort) : (index + 1) * 10,
-          unit: item.unit === 'm2' ? 'm2' : 'fixed',
-        }))
-      );
-      if (data.meta?.note) setPriceNote(data.meta.note);
-      onToast('Сайт подтвердил: прайс сохранён');
+      await savePrices(serverUrl, masterToken, items, note);
+      // Keep current editor state — no full-screen reload spinner.
+      onToast(okMessage);
+      return true;
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Ошибка сохранения прайса', 'err');
+      return false;
     } finally {
       setSavingPrices(false);
     }
   };
 
-  const onSaveServices = async () => {
-    if (!ensureToken()) return;
-    setSavingServices(true);
-    try {
-      const data = await saveServices(serverUrl, masterToken, serviceItems);
-      setServiceItems(data.items || serviceItems);
-      onToast('Сайт подтвердил: карточки услуг сохранены');
-    } catch (error) {
-      onToast(error instanceof Error ? error.message : 'Ошибка сохранения услуг', 'err');
-    } finally {
-      setSavingServices(false);
+  const onDeletePrice = (item: PriceItem) => {
+    // Compute from ref — never from a stale empty array race.
+    const nextItems = priceItemsRef.current.filter((row) => row.id !== item.id);
+    if (nextItems.length < 1) {
+      onToast('Нельзя удалить все позиции прайса', 'err');
+      return;
     }
+    priceItemsRef.current = nextItems;
+    setPriceItems(nextItems);
+
+    void (async () => {
+      if (!ensureToken()) return;
+      const empty = nextItems.find((row) => !String(row.name || '').trim());
+      if (empty) {
+        onToast('Удалено в телефоне. Заполните названия и нажмите «Сохранить прайс»', 'err');
+        return;
+      }
+      if (pricesSaveLock.current) {
+        onToast('Подождите, предыдущее сохранение ещё идёт', 'err');
+        return;
+      }
+      pricesSaveLock.current = true;
+      setSavingPrices(true);
+      try {
+        // Save the exact snapshot we computed — not whatever state is later.
+        await savePrices(serverUrl, masterToken, nextItems, priceNoteRef.current);
+        onToast('Сайт подтвердил: позиция удалена');
+      } catch (error) {
+        onToast(error instanceof Error ? error.message : 'Не удалось удалить на сайте', 'err');
+        await refreshAll({ quiet: true });
+      } finally {
+        pricesSaveLock.current = false;
+        setSavingPrices(false);
+      }
+    })();
+  };
+
+  const onSavePrices = async () => {
+    await persistPrices(priceItems, priceNote, 'Сайт подтвердил: прайс записан и отдаётся клиентам');
   };
 
   const onSaveCalc = async () => {
     if (!ensureToken()) return;
+    const empty = calcItems.find((item) => !String(item.name || '').trim());
+    if (empty) {
+      onToast('У каждой услуги калькулятора должно быть название', 'err');
+      return;
+    }
+    if (calcItems.length < 1) {
+      onToast('Добавьте хотя бы одну услугу в калькулятор', 'err');
+      return;
+    }
     setSavingCalc(true);
     try {
-      const data = await saveCalculator(serverUrl, masterToken, calcRates);
-      if (data.rates) setCalcRates(data.rates);
-      onToast('Сайт подтвердил: калькулятор сохранён');
+      const data = await saveCalculator(serverUrl, masterToken, calcItems);
+      setCalcItems(normalizeCalcItems(data));
+      onToast('Сайт подтвердил: калькулятор записан и отдаётся клиентам');
     } catch (error) {
       onToast(error instanceof Error ? error.message : 'Ошибка сохранения калькулятора', 'err');
     } finally {
@@ -252,7 +372,6 @@ export function PricesPanel({ serverUrl, masterToken, onToast, onNeedSettings }:
         {(
           [
             { id: 'list', label: 'Прайс' },
-            { id: 'services', label: 'Услуги' },
             { id: 'calc', label: 'Калькулятор' },
           ] as const
         ).map((tab) => (
@@ -271,7 +390,8 @@ export function PricesPanel({ serverUrl, masterToken, onToast, onNeedSettings }:
       {subTab === 'list' ? (
         <View>
           <Text style={styles.hint}>
-            Здесь позиции прайса на сайте. Можно добавить, удалить, поставить ₽/м² или фикс.
+            Позиции прайса на сайте. «от» и «На сайте» сохраняются сразу. Удаление тоже сразу убирает
+            строку с сайта. Остальное — через «Сохранить прайс».
           </Text>
 
           <View style={styles.filterRow}>
@@ -297,7 +417,7 @@ export function PricesPanel({ serverUrl, masterToken, onToast, onNeedSettings }:
           </View>
 
           {visiblePrices.length === 0 ? (
-            <Text style={styles.empty}>В этом блоке пока пусто — добавьте позицию.</Text>
+            <Text style={styles.empty}>В этом блоке пока пусто — добавьте услугу.</Text>
           ) : null}
 
           {visiblePrices.map((item) => (
@@ -309,7 +429,11 @@ export function PricesPanel({ serverUrl, masterToken, onToast, onNeedSettings }:
                   onChangeText={(name) => patchPrice(item.id, { name })}
                   placeholder="Название услуги"
                 />
-                <Pressable style={styles.deleteBtn} onPress={() => onDeletePrice(item)}>
+                <Pressable
+                  style={styles.deleteBtn}
+                  onPress={() => onDeletePrice(item)}
+                  disabled={savingPrices}
+                >
                   <Text style={styles.deleteText}>✕</Text>
                 </Pressable>
               </View>
@@ -355,136 +479,77 @@ export function PricesPanel({ serverUrl, masterToken, onToast, onNeedSettings }:
               </View>
 
               <View style={styles.switchRow}>
-                <Text style={styles.switchLabel}>«от»</Text>
-                <Switch
-                  value={item.priceFrom !== false}
-                  onValueChange={(priceFrom) => patchPrice(item.id, { priceFrom })}
-                  trackColor={{ false: '#cbd5e1', true: '#99f6e4' }}
-                  thumbColor={item.priceFrom !== false ? '#0f766e' : '#f8fafc'}
-                />
-                <Text style={[styles.switchLabel, { marginLeft: 12 }]}>На сайте</Text>
-                <Switch
-                  value={item.enabled !== false}
-                  onValueChange={(enabled) => patchPrice(item.id, { enabled })}
-                  trackColor={{ false: '#cbd5e1', true: '#99f6e4' }}
-                  thumbColor={item.enabled !== false ? '#0f766e' : '#f8fafc'}
-                />
-              </View>
-            </View>
-          ))}
-
-          <View style={styles.addRow}>
-            <Pressable style={styles.addBtn} onPress={() => onAddPrice('fixed')}>
-              <Text style={styles.addText}>+ Фикс</Text>
-            </Pressable>
-            <Pressable style={styles.addBtn} onPress={() => onAddPrice('m2')}>
-              <Text style={styles.addText}>+ ₽/м²</Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.actions}>
-            <Pressable style={styles.secondaryBtn} onPress={refreshAll}>
-              <Text style={styles.secondaryText}>Обновить</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.primaryBtn, savingPrices && styles.btnDisabled]}
-              onPress={onSavePrices}
-              disabled={savingPrices}
-            >
-              <Text style={styles.primaryText}>
-                {savingPrices ? 'Сохранение…' : 'Сохранить прайс'}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
-
-      {subTab === 'services' ? (
-        <View>
-          <Text style={styles.hint}>
-            Четыре карточки блока «Услуги» на сайте. Названия фиксированы — правятся цена и время.
-          </Text>
-          {serviceItems.map((item) => (
-            <View key={item.id} style={styles.card}>
-              <Text style={styles.cardTitle}>{SERVICE_TITLES[item.id] || item.id}</Text>
-              <View style={styles.row}>
-                <View style={styles.field}>
-                  <Text style={styles.fieldLabel}>Цена, ₽</Text>
-                  <TextInput
-                    style={styles.input}
-                    keyboardType="numeric"
-                    editable={item.unit !== 'request'}
-                    value={String(item.price ?? 0)}
-                    onChangeText={(v) => patchService(item.id, { price: parseNum(v) })}
-                  />
-                </View>
-                <View style={styles.field}>
-                  <Text style={styles.fieldLabel}>Минут</Text>
-                  <TextInput
-                    style={styles.input}
-                    keyboardType="numeric"
-                    value={item.durationMinutes == null ? '' : String(item.durationMinutes)}
-                    onChangeText={(v) =>
-                      patchService(item.id, {
-                        durationMinutes: v.trim() === '' ? null : parseNum(v),
-                      })
-                    }
-                  />
-                </View>
-              </View>
-              <View style={styles.unitRow}>
-                {(['m2', 'fixed', 'request'] as ServiceUnit[]).map((unit) => (
-                  <Pressable
-                    key={unit}
-                    style={[styles.unitBtn, item.unit === unit && styles.unitBtnActive]}
-                    onPress={() => patchService(item.id, { unit })}
+                <Pressable
+                  style={[styles.flagBtn, item.priceFrom !== false && styles.flagBtnActive]}
+                  onPress={() =>
+                    togglePriceFlag(item.id, { priceFrom: !(item.priceFrom !== false) })
+                  }
+                  disabled={savingPrices}
+                >
+                  <Text
+                    style={[styles.flagText, item.priceFrom !== false && styles.flagTextActive]}
                   >
-                    <Text style={[styles.unitText, item.unit === unit && styles.unitTextActive]}>
-                      {unit === 'm2' ? '₽/м²' : unit === 'fixed' ? 'Фикс' : 'Запрос'}
-                    </Text>
-                  </Pressable>
-                ))}
+                    {item.priceFrom !== false ? '«от» вкл' : '«от» выкл'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.flagBtn, item.enabled !== false && styles.flagBtnActive]}
+                  onPress={() =>
+                    togglePriceFlag(item.id, { enabled: !(item.enabled !== false) })
+                  }
+                  disabled={savingPrices}
+                >
+                  <Text
+                    style={[styles.flagText, item.enabled !== false && styles.flagTextActive]}
+                  >
+                    {item.enabled !== false ? 'На сайте' : 'Скрыто'}
+                  </Text>
+                </Pressable>
               </View>
-              <View style={styles.switchRow}>
-                <Text style={styles.switchLabel}>Показывать «от»</Text>
-                <Switch
-                  value={item.priceFrom !== false}
-                  onValueChange={(priceFrom) => patchService(item.id, { priceFrom })}
-                  trackColor={{ false: '#cbd5e1', true: '#99f6e4' }}
-                  thumbColor={item.priceFrom !== false ? '#0f766e' : '#f8fafc'}
-                />
-              </View>
-              <TextInput
-                style={styles.input}
-                value={item.durationText}
-                onChangeText={(durationText) => patchService(item.id, { durationText })}
-                placeholder="Текст длительности (напр. по объёму)"
-                maxLength={40}
-              />
             </View>
           ))}
-          <View style={styles.actions}>
-            <Pressable
-              style={[styles.primaryBtn, savingServices && styles.btnDisabled]}
-              onPress={onSaveServices}
-              disabled={savingServices}
-            >
-              <Text style={styles.primaryText}>
-                {savingServices ? 'Сохранение…' : 'Сохранить услуги'}
-              </Text>
-            </Pressable>
-          </View>
+
+          <Pressable style={styles.addBtn} onPress={onAddPrice}>
+            <Text style={styles.addText}>Добавить услугу</Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.primaryBtn, savingPrices && styles.btnDisabled, { marginTop: 8, marginBottom: 8 }]}
+            onPress={onSavePrices}
+            disabled={savingPrices}
+          >
+            <Text style={styles.primaryText}>
+              {savingPrices ? 'Сохранение…' : 'Сохранить прайс'}
+            </Text>
+          </Pressable>
         </View>
       ) : null}
 
       {subTab === 'calc' ? (
         <View>
           <Text style={styles.hint}>
-            Ориентир для клиента: тип уборки × размер квартиры (не путать с ₽/м² в прайсе).
+            Ориентир для клиента: тип уборки × размер квартиры. Можно добавить свой тип услуги.
           </Text>
-          {CALC_TYPES.map((type) => (
-            <View key={type.key} style={styles.card}>
-              <Text style={styles.cardTitle}>{type.label}</Text>
+          {calcItems.length === 0 ? (
+            <Text style={styles.empty}>Пока пусто — добавьте услугу в калькулятор.</Text>
+          ) : null}
+          {calcItems.map((item) => (
+            <View key={item.id} style={styles.card}>
+              <View style={styles.cardTop}>
+                <TextInput
+                  style={styles.nameInput}
+                  value={item.name}
+                  onChangeText={(name) => patchCalcItem(item.id, { name })}
+                  placeholder="Название услуги"
+                />
+                <Pressable
+                  style={styles.deleteBtn}
+                  onPress={() => onDeleteCalc(item)}
+                  disabled={savingCalc}
+                >
+                  <Text style={styles.deleteText}>✕</Text>
+                </Pressable>
+              </View>
               <View style={styles.calcGrid}>
                 {CALC_SIZES.map((size) => (
                   <View key={size.key} style={styles.calcCell}>
@@ -492,25 +557,26 @@ export function PricesPanel({ serverUrl, masterToken, onToast, onNeedSettings }:
                     <TextInput
                       style={styles.input}
                       keyboardType="numeric"
-                      value={String(calcRates[type.key][size.key] ?? 0)}
-                      onChangeText={(v) => patchCalc(type.key, size.key, v)}
+                      value={String(item.rates[size.key] ?? 0)}
+                      onChangeText={(v) => patchCalcRate(item.id, size.key, v)}
                     />
                   </View>
                 ))}
               </View>
             </View>
           ))}
-          <View style={styles.actions}>
-            <Pressable
-              style={[styles.primaryBtn, savingCalc && styles.btnDisabled]}
-              onPress={onSaveCalc}
-              disabled={savingCalc}
-            >
-              <Text style={styles.primaryText}>
-                {savingCalc ? 'Сохранение…' : 'Сохранить калькулятор'}
-              </Text>
-            </Pressable>
-          </View>
+          <Pressable style={styles.addBtn} onPress={onAddCalc}>
+            <Text style={styles.addText}>Добавить услугу</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.primaryBtn, savingCalc && styles.btnDisabled, { marginTop: 8, marginBottom: 8 }]}
+            onPress={onSaveCalc}
+            disabled={savingCalc}
+          >
+            <Text style={styles.primaryText}>
+              {savingCalc ? 'Сохранение…' : 'Сохранить калькулятор'}
+            </Text>
+          </Pressable>
         </View>
       ) : null}
     </View>
@@ -606,20 +672,31 @@ const styles = StyleSheet.create({
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
+    flexWrap: 'wrap',
   },
-  switchLabel: { color: '#334155', fontWeight: '600', fontSize: 13 },
+  flagBtn: {
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    backgroundColor: '#fff',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  flagBtnActive: { backgroundColor: '#ecfdf5', borderColor: '#0f766e' },
+  flagText: { color: '#64748b', fontWeight: '700', fontSize: 12 },
+  flagTextActive: { color: '#0f766e' },
   calcGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   calcCell: { width: '47%' },
-  addRow: { flexDirection: 'row', gap: 8, marginTop: 2, marginBottom: 4 },
   addBtn: {
-    flex: 1,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#bbf7d0',
     backgroundColor: '#ecfdf5',
     paddingVertical: 12,
     alignItems: 'center',
+    marginTop: 2,
+    marginBottom: 4,
   },
   addText: { color: '#0f766e', fontWeight: '800' },
   actions: { flexDirection: 'row', gap: 8, marginTop: 8, marginBottom: 8 },

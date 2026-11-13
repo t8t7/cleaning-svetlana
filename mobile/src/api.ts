@@ -241,7 +241,7 @@ export async function savePrices(
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `Ошибка сохранения прайса (${res.status})`);
 
-  // Re-read public site payload — toast only after the site serves the exact list.
+  // Public site view (no token) — only enabled rows, with «от» as clients see it.
   const verified = await fetch(`${apiBase(serverUrl)}/api/prices`, {
     headers: { Accept: 'application/json' },
     cache: 'no-store',
@@ -261,10 +261,22 @@ export async function savePrices(
     if (!found || Math.round(Number(found.price)) !== Math.round(item.price)) {
       throw new Error(`Сайт не подтвердил цену «${item.name || item.id}»`);
     }
+    const wantFrom = item.priceFrom !== false;
+    const gotFrom = found.priceFrom !== false;
+    if (wantFrom !== gotFrom) {
+      throw new Error(`Сайт не подтвердил «от» у «${item.name || item.id}»`);
+    }
+    const label = String(found.priceLabel || '');
+    if (wantFrom && !/^от\s/i.test(label)) {
+      throw new Error(`На сайте нет «от» у «${item.name || item.id}»`);
+    }
+    if (!wantFrom && /^от\s/i.test(label)) {
+      throw new Error(`На сайте лишнее «от» у «${item.name || item.id}»`);
+    }
   }
   for (const id of actualIds) {
     if (!expectedIds.has(id)) {
-      throw new Error('На сайте осталась удалённая позиция прайса');
+      throw new Error('На сайте осталась удалённая или скрытая позиция прайса');
     }
   }
   if (actual.length !== expected.length) {
