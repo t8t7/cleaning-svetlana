@@ -447,7 +447,7 @@ export default function App() {
         <Text style={styles.subtitle}>График, цены и фото</Text>
         {deviceBlocked ? (
           <Text style={styles.blockedBanner}>
-            Это устройство заблокировано в админке. Управление сайтом недоступно.
+            Это устройство заблокировано. Управление сайтом недоступно.
           </Text>
         ) : null}
         {!deviceBlocked && ownerNotice.active ? (
