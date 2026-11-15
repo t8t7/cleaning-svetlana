@@ -154,10 +154,27 @@
       padding: 0.85rem;
     }
     .stat-card strong { display: block; font-size: 1.35rem; margin-top: 0.25rem; }
-    .bars { display: grid; gap: 0.35rem; margin-top: 0.75rem; }
-    .bar-row { display: grid; grid-template-columns: 2.5rem 1fr 2.5rem; gap: 0.45rem; align-items: center; font-size: 0.85rem; }
-    .bar-track { height: 8px; background: #0f2925; border-radius: 999px; overflow: hidden; }
-    .bar-fill { height: 100%; background: var(--accent); border-radius: 999px; }
+    .bars { display: grid; gap: 0.45rem; margin-top: 0.75rem; }
+    .bar-row {
+      display: grid;
+      grid-template-columns: 9rem minmax(0, 1fr) 3rem;
+      gap: 0.55rem;
+      align-items: center;
+      font-size: 0.85rem;
+    }
+    .bar-label {
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .bar-value {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+    }
+    .bar-track { height: 8px; background: #0f2925; border-radius: 999px; overflow: hidden; min-width: 0; }
+    .bar-fill { height: 100%; background: var(--accent); border-radius: 999px; max-width: 100%; }
     .feed { list-style: none; margin: 0.75rem 0 0; padding: 0; display: grid; gap: 0.45rem; }
     .feed li {
       background: var(--card);
@@ -441,14 +458,17 @@
     };
 
     const barsHtml = (items) => {
-      const max = Math.max(1, ...items.map((item) => item.count));
-      return items.map((item) => `
+      const max = Math.max(1, ...items.map((item) => Number(item.count) || 0));
+      return items.map((item) => {
+        const count = Number(item.count) || 0;
+        const width = Math.min(100, Math.round((count / max) * 100));
+        return `
         <div class="bar-row">
-          <span>${escapeHtml(item.label)}</span>
-          <div class="bar-track"><div class="bar-fill" style="width:${Math.round((item.count / max) * 100)}%"></div></div>
-          <span>${item.count}</span>
-        </div>
-      `).join('');
+          <span class="bar-label" title="${escapeHtml(item.label)}">${escapeHtml(item.label)}</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${width}%"></div></div>
+          <span class="bar-value">${count}</span>
+        </div>`;
+      }).join('');
     };
 
     const refreshStats = async () => {

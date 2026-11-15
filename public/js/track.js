@@ -37,6 +37,7 @@
     if (/avito/.test(utm) || /avito\.ru/.test(ref)) return 'avito';
     if (/yandex|ya\.ru/.test(utm) || /yandex\.|ya\.ru/.test(ref)) return 'yandex';
     if (/google/.test(utm) || /google\./.test(ref)) return 'google';
+    if (/\bvk\b|vkontakte/.test(utm) || /(?:^|\/\/|\.)vk\.(?:com|ru|me)\b/.test(ref)) return 'vk';
     if (!ref) return 'direct';
     return 'other';
   };

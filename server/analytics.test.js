@@ -13,9 +13,11 @@ import {
   summarizeAnalytics,
 } from './analytics.js';
 
-test('detectSource understands avito and search', () => {
+test('detectSource understands avito search and vk', () => {
   assert.equal(detectSource({ referrer: 'https://www.avito.ru/x' }), 'avito');
   assert.equal(detectSource({ utmSource: 'yandex' }), 'yandex');
+  assert.equal(detectSource({ referrer: 'https://vk.com/club1' }), 'vk');
+  assert.equal(detectSource({ utmSource: 'vk' }), 'vk');
   assert.equal(detectSource({ referrer: '' }), 'direct');
 });
 

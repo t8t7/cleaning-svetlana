@@ -13,7 +13,7 @@ export const EVENT_TYPES = new Set([
 ]);
 
 export const DEVICES = new Set(['phone', 'tablet', 'desktop']);
-export const SOURCES = new Set(['avito', 'yandex', 'google', 'direct', 'other']);
+export const SOURCES = new Set(['avito', 'yandex', 'google', 'vk', 'direct', 'other']);
 
 const EVENT_LABELS = {
   page_view: 'Открыл сайт',
@@ -34,6 +34,7 @@ const SOURCE_LABELS = {
   avito: 'Авито',
   yandex: 'Яндекс',
   google: 'Google',
+  vk: 'VK',
   direct: 'Прямой заход',
   other: 'Другое',
 };
@@ -70,6 +71,7 @@ export function detectSource({ referrer = '', utmSource = '', utmMedium = '' } =
   if (/avito/.test(utm) || /avito\.ru/.test(ref)) return 'avito';
   if (/yandex|ya\.ru/.test(utm) || /yandex\.|ya\.ru/.test(ref)) return 'yandex';
   if (/google/.test(utm) || /google\./.test(ref)) return 'google';
+  if (/\bvk\b|vkontakte/.test(utm) || /(?:^|\/\/|\.)vk\.(?:com|ru|me)\b/.test(ref)) return 'vk';
   if (!ref.trim()) return 'direct';
   return 'other';
 }
@@ -297,7 +299,16 @@ export function summarizeAnalytics(events) {
         visits: 0,
         unique: new Set(),
         calls: 0,
+        leads: 0,
+        schedule: 0,
+        prices: 0,
+        photos: 0,
         avito: 0,
+        yandex: 0,
+        google: 0,
+        vk: 0,
+        direct: 0,
+        other: 0,
         phone: 0,
         total: 0,
       });
@@ -306,6 +317,11 @@ export function summarizeAnalytics(events) {
     day.total += 1;
     if (device === 'phone') day.phone += 1;
     if (source === 'avito') day.avito += 1;
+    else if (source === 'yandex') day.yandex += 1;
+    else if (source === 'google') day.google += 1;
+    else if (source === 'vk') day.vk += 1;
+    else if (source === 'direct') day.direct += 1;
+    else day.other += 1;
     if (type === 'page_view') {
       day.visits += 1;
       if (event.visitorId) day.unique.add(event.visitorId);
@@ -314,6 +330,10 @@ export function summarizeAnalytics(events) {
       day.calls += 1;
       if (event.visitorId) callers.add(event.visitorId);
     }
+    if (type === 'lead_submit') day.leads += 1;
+    if (type === 'schedule_open') day.schedule += 1;
+    if (type === 'price_view') day.prices += 1;
+    if (type === 'photo_open') day.photos += 1;
   }
 
   const visits = byType.page_view || 0;
@@ -328,7 +348,16 @@ export function summarizeAnalytics(events) {
       visits: day.visits,
       unique: day.unique.size,
       calls: day.calls,
+      leads: day.leads,
+      schedule: day.schedule,
+      prices: day.prices,
+      photos: day.photos,
       avito: day.avito,
+      yandex: day.yandex,
+      google: day.google,
+      vk: day.vk,
+      direct: day.direct,
+      other: day.other,
       phoneShare: day.total ? Math.round((day.phone / day.total) * 1000) / 10 : 0,
     }));
 
@@ -374,9 +403,92 @@ export function summarizeAnalytics(events) {
   };
 }
 
-function styleHeader(row) {
-  row.font = { bold: true };
-  row.alignment = { vertical: 'middle' };
+const HEADER_FILL = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FF0F766E' },
+};
+const DATE_FILL = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FFCCFBF1' },
+};
+const LABEL_FILL = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FFD1FAE5' },
+};
+const ZEBRA_FILL = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FFF0FDFA' },
+};
+
+function formatMoscowDateTime(iso) {
+  if (!iso) return '';
+  try {
+    return new Intl.DateTimeFormat('ru-RU', {
+      timeZone: 'Europe/Moscow',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(iso));
+  } catch {
+    return String(iso);
+  }
+}
+
+function formatMoscowDate(isoOrKey) {
+  if (!isoOrKey) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(isoOrKey)) {
+    const [y, m, d] = isoOrKey.split('-');
+    return `${d}.${m}.${y}`;
+  }
+  try {
+    return new Intl.DateTimeFormat('ru-RU', {
+      timeZone: 'Europe/Moscow',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(isoOrKey));
+  } catch {
+    return String(isoOrKey);
+  }
+}
+
+function paintHeaderRow(row) {
+  row.height = 22;
+  row.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+    cell.fill = HEADER_FILL;
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FF134E4A' } },
+      left: { style: 'thin', color: { argb: 'FF134E4A' } },
+      bottom: { style: 'thin', color: { argb: 'FF134E4A' } },
+      right: { style: 'thin', color: { argb: 'FF134E4A' } },
+    };
+  });
+}
+
+function paintBodyRow(row, { dateCol = 0, zebra = false } = {}) {
+  row.eachCell((cell, colNumber) => {
+    cell.alignment = { vertical: 'middle', horizontal: colNumber === dateCol ? 'left' : 'center' };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FF99F6E4' } },
+      left: { style: 'thin', color: { argb: 'FF99F6E4' } },
+      bottom: { style: 'thin', color: { argb: 'FF99F6E4' } },
+      right: { style: 'thin', color: { argb: 'FF99F6E4' } },
+    };
+    if (colNumber === dateCol) {
+      cell.fill = DATE_FILL;
+      cell.font = { bold: true, color: { argb: 'FF134E4A' } };
+    } else if (zebra) {
+      cell.fill = ZEBRA_FILL;
+    }
+  });
 }
 
 export async function buildAnalyticsWorkbook(summary, events, { from, to } = {}) {
@@ -385,76 +497,137 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
   workbook.created = new Date();
 
   const summarySheet = workbook.addWorksheet('Сводка', {
-    views: [{ state: 'frozen', ySplit: 1 }],
+    views: [{ state: 'frozen', ySplit: 1, xSplit: 2 }],
   });
-  summarySheet.columns = [
-    { header: 'Показатель', key: 'name', width: 36 },
-    { header: 'Значение', key: 'value', width: 22 },
+  const summaryHeaders = [
+    'Период с',
+    'Период по',
+    'Визиты',
+    'Уникальные',
+    'Звонки',
+    'Конверсия %',
+    'Заявки',
+    'Смотрели график',
+    'Смотрели цены',
+    'Открывали фото',
+    'Авито',
+    'Яндекс',
+    'Google',
+    'VK',
+    'Прямой заход',
+    'Другое',
+    'Телефон %',
+    'Планшет %',
+    'Компьютер %',
   ];
-  styleHeader(summarySheet.getRow(1));
-
-  const summaryRows = [
-    ['Период с', from || ''],
-    ['Период по', to || ''],
-    ['Визиты (открытия сайта)', summary.visits],
-    ['Уникальные посетители', summary.unique],
-    ['Клики «Позвонить»', summary.calls],
-    ['Конверсия в звонок, %', summary.conversion],
-    ['Заявки', summary.leads],
-    ['Смотрели график', summary.scheduleViews],
-    ['Смотрели цены', summary.priceViews],
-    ['Открывали фото', summary.photoOpens],
-    ['Телефон, % событий', summary.deviceShare.phone],
-    ['Планшет, % событий', summary.deviceShare.tablet],
-    ['Компьютер, % событий', summary.deviceShare.desktop],
-    ['Авито', summary.sources.avito],
-    ['Яндекс', summary.sources.yandex],
-    ['Google', summary.sources.google],
-    ['Прямой заход', summary.sources.direct],
-    ['Другое', summary.sources.other],
+  summarySheet.addRow(summaryHeaders);
+  summarySheet.columns = summaryHeaders.map((header, index) => ({
+    header,
+    width: index < 2 ? 18 : header.length > 12 ? 16 : 12,
+  }));
+  paintHeaderRow(summarySheet.getRow(1));
+  const summaryValues = [
+    formatMoscowDateTime(from),
+    formatMoscowDateTime(to),
+    summary.visits || 0,
+    summary.unique || 0,
+    summary.calls || 0,
+    summary.conversion || 0,
+    summary.leads || 0,
+    summary.scheduleViews || 0,
+    summary.priceViews || 0,
+    summary.photoOpens || 0,
+    summary.sources?.avito || 0,
+    summary.sources?.yandex || 0,
+    summary.sources?.google || 0,
+    summary.sources?.vk || 0,
+    summary.sources?.direct || 0,
+    summary.sources?.other || 0,
+    summary.deviceShare?.phone || 0,
+    summary.deviceShare?.tablet || 0,
+    summary.deviceShare?.desktop || 0,
   ];
-  for (const [name, value] of summaryRows) {
-    summarySheet.addRow({ name, value });
-  }
+  const summaryData = summarySheet.addRow(summaryValues);
+  paintBodyRow(summaryData, { dateCol: 1 });
+  summaryData.getCell(1).fill = DATE_FILL;
+  summaryData.getCell(1).font = { bold: true, color: { argb: 'FF134E4A' } };
+  summaryData.getCell(2).fill = DATE_FILL;
+  summaryData.getCell(2).font = { bold: true, color: { argb: 'FF134E4A' } };
+  summaryData.height = 20;
 
   const daysSheet = workbook.addWorksheet('По дням', {
-    views: [{ state: 'frozen', ySplit: 1 }],
+    views: [{ state: 'frozen', ySplit: 1, xSplit: 1 }],
   });
-  daysSheet.columns = [
-    { header: 'Дата', key: 'date', width: 14 },
-    { header: 'Визиты', key: 'visits', width: 12 },
-    { header: 'Уникальные', key: 'unique', width: 12 },
-    { header: 'Звонки', key: 'calls', width: 12 },
-    { header: 'С Авито', key: 'avito', width: 12 },
-    { header: 'Телефон %', key: 'phoneShare', width: 12 },
+  const dayHeaders = [
+    'Дата',
+    'Визиты',
+    'Уникальные',
+    'Звонки',
+    'Заявки',
+    'Смотрели график',
+    'Смотрели цены',
+    'Открывали фото',
+    'Авито',
+    'Яндекс',
+    'Google',
+    'VK',
+    'Прямой заход',
+    'Другое',
+    'Телефон %',
   ];
-  styleHeader(daysSheet.getRow(1));
-  for (const day of summary.byDay || []) {
-    daysSheet.addRow(day);
-  }
+  daysSheet.addRow(dayHeaders);
+  daysSheet.columns = dayHeaders.map((header, index) => ({
+    header,
+    width: index === 0 ? 14 : header.length > 12 ? 16 : 12,
+  }));
+  paintHeaderRow(daysSheet.getRow(1));
+  (summary.byDay || []).forEach((day, index) => {
+    const row = daysSheet.addRow([
+      formatMoscowDate(day.date),
+      day.visits || 0,
+      day.unique || 0,
+      day.calls || 0,
+      day.leads || 0,
+      day.schedule || 0,
+      day.prices || 0,
+      day.photos || 0,
+      day.avito || 0,
+      day.yandex || 0,
+      day.google || 0,
+      day.vk || 0,
+      day.direct || 0,
+      day.other || 0,
+      day.phoneShare || 0,
+    ]);
+    paintBodyRow(row, { dateCol: 1, zebra: index % 2 === 1 });
+  });
 
   const eventsSheet = workbook.addWorksheet('События', {
-    views: [{ state: 'frozen', ySplit: 1 }],
+    views: [{ state: 'frozen', ySplit: 1, xSplit: 1 }],
   });
+  const eventHeaders = ['Время', 'Событие', 'Устройство', 'Источник', 'Путь'];
+  eventsSheet.addRow(eventHeaders);
   eventsSheet.columns = [
-    { header: 'Время', key: 'at', width: 22 },
-    { header: 'Событие', key: 'label', width: 22 },
-    { header: 'Код', key: 'type', width: 16 },
-    { header: 'Устройство', key: 'deviceLabel', width: 14 },
-    { header: 'Источник', key: 'sourceLabel', width: 16 },
-    { header: 'Путь', key: 'path', width: 20 },
+    { header: 'Время', width: 18 },
+    { header: 'Событие', width: 20 },
+    { header: 'Устройство', width: 14 },
+    { header: 'Источник', width: 16 },
+    { header: 'Путь', width: 18 },
   ];
-  styleHeader(eventsSheet.getRow(1));
-  for (const event of events) {
-    eventsSheet.addRow({
-      at: event.at,
-      label: EVENT_LABELS[event.type] || event.type,
-      type: event.type,
-      deviceLabel: DEVICE_LABELS[event.device] || event.device,
-      sourceLabel: SOURCE_LABELS[event.source] || event.source,
-      path: event.path || '/',
-    });
-  }
+  paintHeaderRow(eventsSheet.getRow(1));
+  events.forEach((event, index) => {
+    const row = eventsSheet.addRow([
+      formatMoscowDateTime(event.at),
+      EVENT_LABELS[event.type] || event.type,
+      DEVICE_LABELS[event.device] || event.device,
+      SOURCE_LABELS[event.source] || event.source,
+      event.path || '/',
+    ]);
+    paintBodyRow(row, { dateCol: 1, zebra: index % 2 === 1 });
+    row.getCell(2).fill = LABEL_FILL;
+    row.getCell(2).font = { bold: true, color: { argb: 'FF134E4A' } };
+    row.getCell(2).alignment = { vertical: 'middle', horizontal: 'left' };
+  });
 
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);
