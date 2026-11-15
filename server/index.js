@@ -244,6 +244,7 @@ function devicePayloadFromRequest(req) {
     id: sanitizeDeviceId(req.get('x-device-id')),
     name: sanitize(req.get('x-device-name'), 80),
     model: sanitize(req.get('x-device-model'), 80),
+    brand: sanitize(req.get('x-device-brand'), 40),
     platform: sanitize(req.get('x-device-platform'), 40),
     appVersion: sanitize(req.get('x-app-version'), 40),
     ip: clientIp(req),

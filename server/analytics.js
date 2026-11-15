@@ -463,7 +463,7 @@ function paintHeaderRow(row) {
   row.eachCell((cell) => {
     cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
     cell.fill = HEADER_FILL;
-    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: false };
     cell.border = {
       top: { style: 'thin', color: { argb: 'FF134E4A' } },
       left: { style: 'thin', color: { argb: 'FF134E4A' } },
@@ -520,12 +520,34 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     'Планшет %',
     'Компьютер %',
   ];
+  const summaryWidths = {
+    'Период с': 20,
+    'Период по': 20,
+    Визиты: 12,
+    Уникальные: 14,
+    Звонки: 12,
+    'Конверсия %': 14,
+    Заявки: 12,
+    'Смотрели график': 18,
+    'Смотрели цены': 16,
+    'Открывали фото': 18,
+    Авито: 12,
+    Яндекс: 12,
+    Google: 12,
+    VK: 10,
+    'Прямой заход': 16,
+    Другое: 12,
+    'Телефон %': 13,
+    'Планшет %': 13,
+    'Компьютер %': 14,
+  };
   summarySheet.addRow(summaryHeaders);
-  summarySheet.columns = summaryHeaders.map((header, index) => ({
+  summarySheet.columns = summaryHeaders.map((header) => ({
     header,
-    width: index < 2 ? 18 : header.length > 12 ? 16 : 12,
+    width: summaryWidths[header] || Math.max(14, header.length + 2),
   }));
   paintHeaderRow(summarySheet.getRow(1));
+  summarySheet.getRow(1).height = 24;
   const summaryValues = [
     formatMoscowDateTime(from),
     formatMoscowDateTime(to),
@@ -575,12 +597,30 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     'Другое',
     'Телефон %',
   ];
+  const dayWidths = {
+    Дата: 14,
+    Визиты: 12,
+    Уникальные: 14,
+    Звонки: 12,
+    Заявки: 12,
+    'Смотрели график': 18,
+    'Смотрели цены': 16,
+    'Открывали фото': 18,
+    Авито: 12,
+    Яндекс: 12,
+    Google: 12,
+    VK: 10,
+    'Прямой заход': 16,
+    Другое: 12,
+    'Телефон %': 13,
+  };
   daysSheet.addRow(dayHeaders);
-  daysSheet.columns = dayHeaders.map((header, index) => ({
+  daysSheet.columns = dayHeaders.map((header) => ({
     header,
-    width: index === 0 ? 14 : header.length > 12 ? 16 : 12,
+    width: dayWidths[header] || Math.max(14, header.length + 2),
   }));
   paintHeaderRow(daysSheet.getRow(1));
+  daysSheet.getRow(1).height = 24;
   (summary.byDay || []).forEach((day, index) => {
     const row = daysSheet.addRow([
       formatMoscowDate(day.date),

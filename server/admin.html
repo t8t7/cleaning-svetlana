@@ -403,16 +403,21 @@
         return;
       }
       devicesEl.innerHTML = items.map((item) => {
-        const title = item.label || item.name || item.model || item.id;
+        const title = item.label || item.brand || item.name || item.model || item.id;
+        const phoneLine = [
+          item.brand ? `Марка: ${item.brand}` : null,
+          item.model ? `Модель: ${item.model}` : null,
+          !item.brand && !item.model && item.name ? item.name : null,
+        ].filter(Boolean).join(' · ') || '—';
         return `
           <article class="card ${item.blocked ? 'blocked' : ''}" data-id="${item.id}">
             <div class="row" style="justify-content:space-between">
-              <strong>${escapeHtml(title)}</strong>
+              <strong data-device-title>${escapeHtml(title)}</strong>
               <span class="badge ${item.blocked ? 'bad' : ''}">${item.blocked ? 'Блок' : 'ОК'}</span>
             </div>
             <div class="meta" style="margin-top:0.45rem">
               ID: <span class="mono">${escapeHtml(item.id)}</span><br/>
-              Телефон: ${escapeHtml(item.name || '—')} · ${escapeHtml(item.model || '—')}<br/>
+              Телефон: ${escapeHtml(phoneLine)}<br/>
               Платформа: ${escapeHtml(item.platform || '—')} · app ${escapeHtml(item.appVersion || '—')}<br/>
               Последний вход: ${escapeHtml(fmt(item.lastSeenAt))}<br/>
               IP: ${escapeHtml(item.lastIp || '—')}
@@ -734,11 +739,19 @@
       const id = card.getAttribute('data-id');
       try {
         if (event.target.matches('[data-save-label]')) {
-          const label = card.querySelector('[data-label-input]')?.value || '';
-          await api(`__PANEL__/api/devices/${encodeURIComponent(id)}`, {
+          const input = card.querySelector('[data-label-input]');
+          const label = input?.value || '';
+          const data = await api(`__PANEL__/api/devices/${encodeURIComponent(id)}`, {
             method: 'PATCH',
             body: JSON.stringify({ label }),
           });
+          const saved = data.item || {};
+          const savedLabel = saved.label || '';
+          if (input) input.value = savedLabel;
+          const titleEl = card.querySelector('[data-device-title]');
+          if (titleEl) {
+            titleEl.textContent = savedLabel || saved.brand || saved.name || saved.model || id;
+          }
           await refresh();
           toast('Метка сохранена');
         }

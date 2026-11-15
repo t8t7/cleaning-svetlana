@@ -43,11 +43,55 @@ export function sanitizeDeviceText(value, max = 80) {
     .slice(0, max);
 }
 
+export function resolvePhoneBrand({ brand = '', model = '', name = '' } = {}) {
+  const hinted = sanitizeDeviceText(brand, 40);
+  if (hinted && !/^android$/i.test(hinted)) {
+    const pretty = hinted.charAt(0).toUpperCase() + hinted.slice(1);
+    if (/samsung/i.test(pretty)) return 'Samsung';
+    if (/infinix/i.test(pretty)) return 'Infinix';
+    if (/xiaomi|redmi|poco/i.test(pretty)) return 'Xiaomi';
+    if (/huawei/i.test(pretty)) return 'Huawei';
+    if (/honor/i.test(pretty)) return 'Honor';
+    if (/tecno/i.test(pretty)) return 'Tecno';
+    if (/realme/i.test(pretty)) return 'Realme';
+    if (/oneplus/i.test(pretty)) return 'OnePlus';
+    if (/motorola|moto/i.test(pretty)) return 'Motorola';
+    if (/google/i.test(pretty)) return 'Google';
+    if (/apple/i.test(pretty)) return 'Apple';
+    return pretty;
+  }
+
+  const blob = `${model} ${name}`.toUpperCase();
+  if (/SAMSUNG|\bSM-|\bGT-|\bGALAXY\b/.test(blob)) return 'Samsung';
+  if (/INFINIX/.test(blob)) return 'Infinix';
+  if (/XIAOMI|REDMI|\bPOCO\b|\bMI\s?\d/.test(blob)) return 'Xiaomi';
+  if (/\bHUAWEI\b|\bHMA-|\bVOG-|\bLYA-/.test(blob)) return 'Huawei';
+  if (/\bHONOR\b|\bANY-|\bNTH-/.test(blob)) return 'Honor';
+  if (/TECNO/.test(blob)) return 'Tecno';
+  if (/REALME/.test(blob)) return 'Realme';
+  if (/ONEPLUS|\bOP\d{2}/.test(blob)) return 'OnePlus';
+  if (/OPPO|\bCPH\d/.test(blob)) return 'Oppo';
+  if (/\bVIVO\b|\bV\d{4}[A-Z]?\b/.test(blob)) return 'vivo';
+  if (/MOTOROLA|\bMOTO\b/.test(blob)) return 'Motorola';
+  if (/PIXEL|GOOGLE/.test(blob)) return 'Google';
+  if (/IPHONE|IPAD|APPLE/.test(blob)) return 'Apple';
+  if (/NOKIA/.test(blob)) return 'Nokia';
+  return '';
+}
+
 export function publicDevice(item) {
+  const model = item.model || '';
+  const name = item.name || '';
+  const brand = resolvePhoneBrand({
+    brand: item.brand || '',
+    model,
+    name,
+  });
   return {
     id: item.id,
-    name: item.name || '',
-    model: item.model || '',
+    name,
+    model,
+    brand,
     platform: item.platform || '',
     appVersion: item.appVersion || '',
     label: item.label || '',
@@ -64,12 +108,14 @@ export async function touchDevice(filePath, payload) {
 
   const data = await readDevices(filePath);
   const now = new Date().toISOString();
+  const brand = sanitizeDeviceText(payload?.brand, 40);
   let item = data.items.find((entry) => entry.id === id);
   if (!item) {
     item = {
       id,
       name: sanitizeDeviceText(payload?.name, 80),
       model: sanitizeDeviceText(payload?.model, 80),
+      brand,
       platform: sanitizeDeviceText(payload?.platform, 40),
       appVersion: sanitizeDeviceText(payload?.appVersion, 40),
       label: '',
@@ -82,6 +128,7 @@ export async function touchDevice(filePath, payload) {
   } else {
     item.name = sanitizeDeviceText(payload?.name, 80) || item.name || '';
     item.model = sanitizeDeviceText(payload?.model, 80) || item.model || '';
+    if (brand) item.brand = brand;
     item.platform = sanitizeDeviceText(payload?.platform, 40) || item.platform || '';
     item.appVersion = sanitizeDeviceText(payload?.appVersion, 40) || item.appVersion || '';
     item.lastSeenAt = now;

@@ -35,6 +35,7 @@ export function getDeviceProfile() {
   const local = getLocalAppVersion();
   return {
     name,
+    brand: brand || '',
     model: model || brand || Platform.OS,
     platform: `${Platform.OS} ${String(Platform.Version)}`,
     appVersion: `${local.versionName} (${local.versionCode})`,
@@ -48,6 +49,7 @@ export async function buildDeviceHeaders(): Promise<Record<string, string>> {
     'X-Device-Id': id,
     'X-Device-Name': profile.name,
     'X-Device-Model': profile.model,
+    'X-Device-Brand': profile.brand,
     'X-Device-Platform': profile.platform,
     'X-App-Version': profile.appVersion,
   };
