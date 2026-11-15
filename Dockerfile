@@ -9,6 +9,7 @@ FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
+RUN apk add --no-cache fontconfig font-dejavu
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev && mkdir -p data
 COPY --from=build /app/dist ./dist

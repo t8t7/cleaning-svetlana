@@ -1,8 +1,34 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
+import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import ExcelJS from 'exceljs';
 import sharp from 'sharp';
+
+const ANALYTICS_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DONUT_FONT_REGULAR = path.join(ANALYTICS_DIR, 'assets', 'fonts', 'DejaVuSans.ttf');
+const DONUT_FONT_BOLD = path.join(ANALYTICS_DIR, 'assets', 'fonts', 'DejaVuSans-Bold.ttf');
+
+let donutFontCssCache = null;
+
+function getDonutFontCss() {
+  if (donutFontCssCache) return donutFontCssCache;
+  const regular = fs.readFileSync(DONUT_FONT_REGULAR).toString('base64');
+  const bold = fs.readFileSync(DONUT_FONT_BOLD).toString('base64');
+  donutFontCssCache = `@font-face{font-family:'DonutSans';src:url(data:font/ttf;base64,${regular}) format('truetype');}
+@font-face{font-family:'DonutSans';font-weight:700;src:url(data:font/ttf;base64,${bold}) format('truetype');}`;
+  return donutFontCssCache;
+}
+
+function escapeXml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;');
+}
 
 export const EVENT_TYPES = new Set([
   'page_view',
@@ -239,14 +265,14 @@ function listMonthKeysBetween(fromIso, toIso) {
 export async function appendAnalyticsEvent(dir, event) {
   const month = monthKeyFromIso(event.at);
   const file = monthFile(dir, month);
-  await fs.mkdir(dir, { recursive: true });
-  await fs.appendFile(file, `${JSON.stringify(event)}\n`, 'utf8');
+  await fsPromises.mkdir(dir, { recursive: true });
+  await fsPromises.appendFile(file, `${JSON.stringify(event)}\n`, 'utf8');
   return event;
 }
 
 async function readMonthFile(file) {
   try {
-    const raw = await fs.readFile(file, 'utf8');
+    const raw = await fsPromises.readFile(file, 'utf8');
     return raw
       .split('\n')
       .map((line) => line.trim())
@@ -973,7 +999,7 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     });
     attentionSheet.addImage(imageId, {
       tl: { col: 5, row: 1 },
-      ext: { width: 320, height: 420 },
+      ext: { width: 320, height: 430 },
     });
   } catch (error) {
     console.error('attention_donut_error', error);
@@ -1021,11 +1047,12 @@ async function buildAttentionDonutPng(summary) {
   ];
   const total = parts.reduce((a, b) => a + b.value, 0) || 1;
   const cx = 160;
-  const cy = 160;
+  const cy = 170;
   const r = 90;
   const stroke = 44;
   const circumference = 2 * Math.PI * r;
   let offset = 0;
+  const fontCss = getDonutFontCss();
   const circles = parts
     .map((part) => {
       const len = (part.value / total) * circumference;
@@ -1036,19 +1063,22 @@ async function buildAttentionDonutPng(summary) {
     .join('');
   const legend = parts
     .map((part, index) => {
-      const y = 330 + index * 28;
+      const y = 340 + index * 28;
       const pct = Math.round((part.value / total) * 100);
-      return `<rect x="40" y="${y}" width="16" height="16" rx="3" fill="${part.color}"/><text x="66" y="${y + 13}" font-family="Arial,sans-serif" font-size="14" fill="#134e4a">${part.label}: ${part.value} сек (${pct}%)</text>`;
+      return `<rect x="40" y="${y}" width="16" height="16" rx="3" fill="${part.color}"/><text x="66" y="${y + 13}" font-family="DonutSans, DejaVu Sans, sans-serif" font-size="14" fill="#134e4a">${escapeXml(part.label)}: ${part.value} сек (${pct}%)</text>`;
     })
     .join('');
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="320" height="420" viewBox="0 0 320 420">
-  <rect width="320" height="420" fill="#ffffff"/>
-  <text x="160" y="36" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#134e4a">Куда смотрят дольше</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="430" viewBox="0 0 320 430">
+  <defs><style type="text/css"><![CDATA[
+${fontCss}
+  ]]></style></defs>
+  <rect width="320" height="430" fill="#ffffff"/>
+  <text x="160" y="36" text-anchor="middle" font-family="DonutSans, DejaVu Sans, sans-serif" font-size="18" font-weight="700" fill="#134e4a">Куда смотрят дольше</text>
   ${circles}
   <circle cx="${cx}" cy="${cy}" r="${r - stroke / 2 - 6}" fill="#ffffff"/>
-  <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-family="Arial,sans-serif" font-size="15" fill="#134e4a">внимание</text>
-  <text x="${cx}" y="${cy + 20}" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" fill="#0f766e">${total} сек</text>
+  <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-family="DonutSans, DejaVu Sans, sans-serif" font-size="15" fill="#134e4a">внимание</text>
+  <text x="${cx}" y="${cy + 20}" text-anchor="middle" font-family="DonutSans, DejaVu Sans, sans-serif" font-size="13" fill="#0f766e">${total} сек</text>
   ${legend}
 </svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
