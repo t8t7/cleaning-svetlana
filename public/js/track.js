@@ -96,6 +96,7 @@
     const map = [
       { sel: '#schedule', type: 'schedule_open' },
       { sel: '#pricing', type: 'price_view' },
+      { sel: '#reviews', type: 'reviews_view' },
     ];
     const io = new IntersectionObserver(
       (entries) => {

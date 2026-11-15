@@ -9,7 +9,7 @@ export const EVENT_TYPES = new Set([
   'price_view',
   'photo_open',
   'call_click',
-  'lead_submit',
+  'reviews_view',
 ]);
 
 export const DEVICES = new Set(['phone', 'tablet', 'desktop']);
@@ -21,7 +21,7 @@ const EVENT_LABELS = {
   price_view: 'Смотрел цены',
   photo_open: 'Открыл фото',
   call_click: 'Нажал Позвонить',
-  lead_submit: 'Заявка',
+  reviews_view: 'Смотрел отзывы',
 };
 
 const DEVICE_LABELS = {
@@ -299,7 +299,7 @@ export function summarizeAnalytics(events) {
         visits: 0,
         unique: new Set(),
         calls: 0,
-        leads: 0,
+        reviews: 0,
         schedule: 0,
         prices: 0,
         photos: 0,
@@ -330,7 +330,7 @@ export function summarizeAnalytics(events) {
       day.calls += 1;
       if (event.visitorId) callers.add(event.visitorId);
     }
-    if (type === 'lead_submit') day.leads += 1;
+    if (type === 'reviews_view') day.reviews += 1;
     if (type === 'schedule_open') day.schedule += 1;
     if (type === 'price_view') day.prices += 1;
     if (type === 'photo_open') day.photos += 1;
@@ -348,7 +348,7 @@ export function summarizeAnalytics(events) {
       visits: day.visits,
       unique: day.unique.size,
       calls: day.calls,
-      leads: day.leads,
+      reviews: day.reviews,
       schedule: day.schedule,
       prices: day.prices,
       photos: day.photos,
@@ -379,7 +379,7 @@ export function summarizeAnalytics(events) {
     unique: uniqueVisitors.size,
     calls,
     conversion,
-    leads: byType.lead_submit || 0,
+    reviewViews: byType.reviews_view || 0,
     scheduleViews: byType.schedule_open || 0,
     priceViews: byType.price_view || 0,
     photoOpens: byType.photo_open || 0,
@@ -506,7 +506,7 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     'Уникальные',
     'Звонки',
     'Конверсия %',
-    'Заявки',
+    'Смотрели отзывы',
     'Смотрели график',
     'Смотрели цены',
     'Открывали фото',
@@ -527,7 +527,7 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     Уникальные: 14,
     Звонки: 12,
     'Конверсия %': 14,
-    Заявки: 12,
+    'Смотрели отзывы': 18,
     'Смотрели график': 18,
     'Смотрели цены': 16,
     'Открывали фото': 18,
@@ -555,7 +555,7 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     summary.unique || 0,
     summary.calls || 0,
     summary.conversion || 0,
-    summary.leads || 0,
+    summary.reviewViews || 0,
     summary.scheduleViews || 0,
     summary.priceViews || 0,
     summary.photoOpens || 0,
@@ -585,7 +585,7 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     'Визиты',
     'Уникальные',
     'Звонки',
-    'Заявки',
+    'Смотрели отзывы',
     'Смотрели график',
     'Смотрели цены',
     'Открывали фото',
@@ -602,7 +602,7 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     Визиты: 12,
     Уникальные: 14,
     Звонки: 12,
-    Заявки: 12,
+    'Смотрели отзывы': 18,
     'Смотрели график': 18,
     'Смотрели цены': 16,
     'Открывали фото': 18,
@@ -627,7 +627,7 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
       day.visits || 0,
       day.unique || 0,
       day.calls || 0,
-      day.leads || 0,
+      day.reviews || 0,
       day.schedule || 0,
       day.prices || 0,
       day.photos || 0,

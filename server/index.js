@@ -1258,13 +1258,6 @@ app.post('/api/lead', leadLimiter, async (req, res) => {
       ip: req.ip,
     };
     await fs.appendFile(leadsFile, `${JSON.stringify(record)}\n`, 'utf8');
-    const track = normalizeEventInput(
-      { type: 'lead_submit', device: 'desktop', source: 'direct', path: '/' },
-      { ip: req.ip, userAgent: req.get('user-agent') || '' }
-    );
-    if (track.ok) {
-      await appendAnalyticsEvent(analyticsDir, track.event).catch(() => {});
-    }
     return res.status(201).json({ ok: true });
   } catch (error) {
     console.error('lead_error', error);
