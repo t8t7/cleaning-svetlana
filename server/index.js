@@ -456,10 +456,46 @@ async function cleanupTemp(file) {
 const availabilityStreamClients = new Set();
 const pricingStreamClients = new Set();
 const worksStreamClients = new Set();
+const sseConnectionsByIp = new Map();
+const SSE_MAX_TOTAL = 200;
+const SSE_MAX_PER_IP = 8;
 
 function sendSseEvent(res, event, payload) {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function sseTotalConnections() {
+  return (
+    availabilityStreamClients.size + pricingStreamClients.size + worksStreamClients.size
+  );
+}
+
+/** Acquire an SSE slot or send 429/503. Returns cleanup fn on success. */
+function acquireSseConnection(req, res, clients) {
+  const ip = clientIp(req) || 'unknown';
+  if (sseTotalConnections() >= SSE_MAX_TOTAL) {
+    res.status(503).json({ error: 'Слишком много подключений. Попробуйте позже.' });
+    return null;
+  }
+  const current = sseConnectionsByIp.get(ip) || 0;
+  if (current >= SSE_MAX_PER_IP) {
+    res.status(429).json({ error: 'Слишком много подключений с вашего адреса.' });
+    return null;
+  }
+
+  sseConnectionsByIp.set(ip, current + 1);
+  clients.add(res);
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    clients.delete(res);
+    const left = (sseConnectionsByIp.get(ip) || 1) - 1;
+    if (left <= 0) sseConnectionsByIp.delete(ip);
+    else sseConnectionsByIp.set(ip, left);
+  };
 }
 
 function broadcastToClients(clients, event, payload) {
@@ -623,13 +659,15 @@ app.get('/api/availability', async (_req, res) => {
 });
 
 app.get('/api/availability/stream', async (req, res) => {
+  const release = acquireSseConnection(req, res, availabilityStreamClients);
+  if (!release) return;
+
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
-  availabilityStreamClients.add(res);
   sendSseEvent(res, 'connected', { ok: true });
 
   try {
@@ -649,7 +687,7 @@ app.get('/api/availability/stream', async (req, res) => {
 
   const cleanup = () => {
     clearInterval(heartbeat);
-    availabilityStreamClients.delete(res);
+    release();
   };
   req.on('close', cleanup);
   req.on('error', cleanup);
@@ -722,13 +760,15 @@ app.put('/api/prices', pricesWriteLimiter, async (req, res) => {
 });
 
 app.get('/api/pricing/stream', async (req, res) => {
+  const release = acquireSseConnection(req, res, pricingStreamClients);
+  if (!release) return;
+
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
-  pricingStreamClients.add(res);
   sendSseEvent(res, 'connected', { ok: true });
 
   try {
@@ -754,7 +794,7 @@ app.get('/api/pricing/stream', async (req, res) => {
 
   const cleanup = () => {
     clearInterval(heartbeat);
-    pricingStreamClients.delete(res);
+    release();
   };
   req.on('close', cleanup);
   req.on('error', cleanup);
@@ -871,16 +911,14 @@ app.post('/api/works', worksWriteLimiter, (req, res) => {
 });
 
 app.get('/api/works/stream', async (req, res) => {
+  const release = acquireSseConnection(req, res, worksStreamClients);
+  if (!release) return;
+
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   if (typeof res.flushHeaders === 'function') res.flushHeaders();
-
-  worksStreamClients.add(res);
-  req.on('close', () => {
-    worksStreamClients.delete(res);
-  });
 
   try {
     const data = await readWorks(worksFile);
@@ -897,11 +935,16 @@ app.get('/api/works/stream', async (req, res) => {
       res.write(': ping\n\n');
     } catch {
       clearInterval(heartbeat);
-      worksStreamClients.delete(res);
+      release();
     }
   }, 25000);
 
-  req.on('close', () => clearInterval(heartbeat));
+  const cleanup = () => {
+    clearInterval(heartbeat);
+    release();
+  };
+  req.on('close', cleanup);
+  req.on('error', cleanup);
 });
 
 app.delete('/api/works/:id', worksWriteLimiter, async (req, res) => {

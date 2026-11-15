@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ExcelJS from 'exceljs';
+import ExcelJS from 'exceljs-hardened';
 import opentype from 'opentype.js';
 import sharp from 'sharp';
 
