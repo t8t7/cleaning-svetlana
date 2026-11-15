@@ -183,6 +183,48 @@
       padding: 0.55rem 0.7rem;
       font-size: 0.9rem;
     }
+    .weekday-table { overflow-x: auto; }
+    .weekday-table table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    .weekday-table th, .weekday-table td {
+      border: 1px solid var(--line);
+      padding: 0.55rem 0.65rem;
+      text-align: left;
+    }
+    .weekday-table th {
+      background: #0f2925;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .weekday-table td:first-child { color: var(--ok); font-weight: 700; }
+    .heat-wrap { overflow-x: auto; }
+    .heat {
+      border-collapse: collapse;
+      font-size: 0.75rem;
+      min-width: 640px;
+    }
+    .heat th, .heat td {
+      border: 1px solid #0b1f1c;
+      padding: 0.28rem 0.2rem;
+      text-align: center;
+      min-width: 2rem;
+    }
+    .heat th {
+      background: #0f2925;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .heat td.day {
+      text-align: left;
+      padding-left: 0.45rem;
+      color: var(--ok);
+      font-weight: 700;
+      background: #0f2925;
+      min-width: 2.4rem;
+    }
   </style>
 </head>
 <body>
@@ -316,8 +358,12 @@
               <div class="bars" id="statsDevices"></div>
             </div>
           </div>
-          <h2 style="margin-top:1rem">По часам (Москва)</h2>
-          <div class="bars" id="statsHours"></div>
+          <h2 style="margin-top:1rem">Когда заходят</h2>
+          <p class="meta" id="whenPhrase" style="margin:0.35rem 0 0.75rem">—</p>
+          <div id="weekdayTable" class="weekday-table"></div>
+          <h2 style="margin-top:1.1rem">Теплокарта (день × час, Москва)</h2>
+          <p class="meta" style="margin:0.35rem 0 0.65rem">Чем ярче клетка — тем больше заходов в этот час.</p>
+          <div id="statsHeatmap" class="heat-wrap"></div>
           <h2 style="margin-top:1rem">Последние действия</h2>
           <ul class="feed" id="statsFeed"></ul>
         </section>
@@ -530,12 +576,61 @@
           count,
         }))
       );
-      document.getElementById('statsHours').innerHTML = barsHtml(
-        (s.byHour || []).map((count, hour) => ({
-          label: `${String(hour).padStart(2, '0')}`,
-          count,
-        })).filter((item) => item.count > 0).slice(0, 24)
-      );
+      document.getElementById('whenPhrase').textContent = s.whenPhrase || 'Пока мало данных по часам.';
+      const weekdayRows = s.weekdayReport || [];
+      document.getElementById('weekdayTable').innerHTML = weekdayRows.length
+        ? `<table>
+            <thead>
+              <tr>
+                <th>День</th>
+                <th>Визиты</th>
+                <th>Звонки</th>
+                <th>Час-пик</th>
+                <th>Со скольки до скольки</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${weekdayRows.map((row) => `
+                <tr>
+                  <td>${escapeHtml(row.dayFull || row.day)}</td>
+                  <td>${row.visits || 0}</td>
+                  <td>${row.calls || 0}</td>
+                  <td>${row.peakHour == null ? '—' : `${String(row.peakHour).padStart(2, '0')}:00`}</td>
+                  <td>${escapeHtml(row.windowLabel || '—')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>`
+        : '<p class="meta">Пока нет данных по дням недели.</p>';
+
+      const heat = s.heatmap || { hours: [], days: [], max: 0 };
+      const heatMax = Math.max(1, heat.max || 0);
+      document.getElementById('statsHeatmap').innerHTML = heat.days?.length
+        ? `<table class="heat">
+            <thead>
+              <tr>
+                <th></th>
+                ${(heat.hours || []).map((h) => `<th>${String(h).padStart(2, '0')}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${(heat.days || []).map((day) => `
+                <tr>
+                  <td class="day">${escapeHtml(day.label)}</td>
+                  ${(day.cells || []).map((value) => {
+                    const t = value / heatMax;
+                    const bg = value <= 0
+                      ? '#0f2925'
+                      : `color-mix(in srgb, #34d399 ${Math.round(18 + t * 82)}%, #0f2925)`;
+                    const color = t > 0.55 ? '#042f2e' : 'var(--text)';
+                    return `<td style="background:${bg};color:${color}">${value || ''}</td>`;
+                  }).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>`
+        : '<p class="meta">Пока нет данных для теплокарты.</p>';
+
       const feed = document.getElementById('statsFeed');
       const recent = s.recent || [];
       feed.innerHTML = recent.length

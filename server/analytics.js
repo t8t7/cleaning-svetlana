@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
+import sharp from 'sharp';
 
 export const EVENT_TYPES = new Set([
   'page_view',
@@ -49,6 +50,78 @@ const SOURCE_LABELS = {
 };
 
 const WEEKDAY_RU = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+const WEEKDAY_FULL = [
+  'Воскресенье',
+  'Понедельник',
+  'Вторник',
+  'Среда',
+  'Четверг',
+  'Пятница',
+  'Суббота',
+];
+/** Monday-first order of JS weekday indexes (0=Sun). */
+const WEEKDAY_MON_FIRST = [1, 2, 3, 4, 5, 6, 0];
+const HEAT_HOURS = Array.from({ length: 15 }, (_, i) => i + 8); // 08..22
+
+function peakWindow(hoursArr) {
+  const total = hoursArr.reduce((a, b) => a + b, 0);
+  if (!total) {
+    return { visits: 0, calls: 0, peakHour: null, fromHour: null, toHour: null, windowLabel: '—' };
+  }
+  let peakHour = 0;
+  for (let h = 1; h < hoursArr.length; h += 1) {
+    if (hoursArr[h] > hoursArr[peakHour]) peakHour = h;
+  }
+  let from = peakHour;
+  let to = peakHour;
+  let covered = hoursArr[peakHour];
+  const target = total * 0.7;
+  while (covered < target && (from > 0 || to < hoursArr.length - 1)) {
+    const left = from > 0 ? hoursArr[from - 1] : -1;
+    const right = to < hoursArr.length - 1 ? hoursArr[to + 1] : -1;
+    if (right >= left) {
+      to += 1;
+      covered += hoursArr[to];
+    } else {
+      from -= 1;
+      covered += hoursArr[from];
+    }
+  }
+  const pad = (h) => `${String(h).padStart(2, '0')}:00`;
+  return {
+    visits: total,
+    peakHour,
+    fromHour: from,
+    toHour: to,
+    windowLabel: from === to ? pad(from) : `${pad(from)}–${pad(to + 1)}`,
+  };
+}
+
+function buildWhenPhrase(byHour) {
+  const slice = HEAT_HOURS.map((h) => ({ h, count: byHour[h] || 0 }));
+  const total = slice.reduce((a, b) => a + b.count, 0);
+  if (!total) return 'Пока мало данных по часам.';
+  const ranked = [...slice].sort((a, b) => b.count - a.count);
+  const top = ranked.filter((x) => x.count > 0).slice(0, 3).map((x) => x.h);
+  if (!top.length) return 'Пока мало данных по часам.';
+  const minH = Math.min(...top);
+  const maxH = Math.max(...top);
+  if (minH === maxH) {
+    return `Чаще всего заходят около ${String(minH).padStart(2, '0')}:00 (Москва).`;
+  }
+  return `Чаще всего заходят с ${String(minH).padStart(2, '0')}:00 до ${String(maxH + 1).padStart(2, '0')}:00 (Москва).`;
+}
+
+function heatColor(value, max) {
+  if (!max || value <= 0) return 'FFECFDF5';
+  const t = Math.min(1, value / max);
+  // light teal -> strong teal
+  const r = Math.round(236 - t * (236 - 15));
+  const g = Math.round(253 - t * (253 - 118));
+  const b = Math.round(245 - t * (245 - 110));
+  const hex = (n) => n.toString(16).padStart(2, '0').toUpperCase();
+  return `FF${hex(r)}${hex(g)}${hex(b)}`;
+}
 
 function sanitizeShort(value, max = 64) {
   return String(value || '')
@@ -306,6 +379,10 @@ export function summarizeAnalytics(events) {
   const byType = emptyCounter([...EVENT_TYPES]);
   const byHour = Array.from({ length: 24 }, () => 0);
   const byWeekday = Array.from({ length: 7 }, () => 0);
+  const heatVisits = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
+  const heatCalls = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
+  const weekdayHourVisits = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
+  const weekdayCalls = Array.from({ length: 7 }, () => 0);
   const byDayMap = new Map();
   const uniqueVisitors = new Set();
   const callers = new Set();
@@ -326,6 +403,14 @@ export function summarizeAnalytics(events) {
     }
     if (Number.isFinite(parts.weekday) && parts.weekday >= 0 && parts.weekday < 7) {
       byWeekday[parts.weekday] += 1;
+    }
+    if (type === 'page_view' && Number.isFinite(parts.weekday) && Number.isFinite(parts.hour)) {
+      heatVisits[parts.weekday][parts.hour] += 1;
+      weekdayHourVisits[parts.weekday][parts.hour] += 1;
+    }
+    if (type === 'call_click' && Number.isFinite(parts.weekday) && Number.isFinite(parts.hour)) {
+      heatCalls[parts.weekday][parts.hour] += 1;
+      weekdayCalls[parts.weekday] += 1;
     }
 
     if (!byDayMap.has(parts.dateKey)) {
@@ -448,6 +533,39 @@ export function summarizeAnalytics(events) {
       };
     });
 
+  const weekdayReport = WEEKDAY_MON_FIRST.map((weekday) => {
+    const win = peakWindow(weekdayHourVisits[weekday]);
+    return {
+      weekday,
+      day: WEEKDAY_RU[weekday],
+      dayFull: WEEKDAY_FULL[weekday],
+      visits: win.visits,
+      calls: weekdayCalls[weekday] || 0,
+      peakHour: win.peakHour,
+      fromHour: win.fromHour,
+      toHour: win.toHour,
+      windowLabel: win.windowLabel,
+    };
+  });
+
+  let heatMax = 0;
+  for (const weekday of WEEKDAY_MON_FIRST) {
+    for (const hour of HEAT_HOURS) {
+      heatMax = Math.max(heatMax, heatVisits[weekday][hour] || 0);
+    }
+  }
+
+  const heatmap = {
+    hours: HEAT_HOURS,
+    days: WEEKDAY_MON_FIRST.map((weekday) => ({
+      weekday,
+      label: WEEKDAY_RU[weekday],
+      labelFull: WEEKDAY_FULL[weekday],
+      cells: HEAT_HOURS.map((hour) => heatVisits[weekday][hour] || 0),
+    })),
+    max: heatMax,
+  };
+
   return {
     visits,
     unique: uniqueVisitors.size,
@@ -477,6 +595,9 @@ export function summarizeAnalytics(events) {
       day: WEEKDAY_RU[index],
       count,
     })),
+    weekdayReport,
+    heatmap,
+    whenPhrase: buildWhenPhrase(byHour),
     byDay,
     byType,
     recent,
@@ -753,6 +874,111 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     paintBodyRow(row, { dateCol: 1, zebra: index % 2 === 1 });
   });
 
+  const whenSheet = workbook.addWorksheet('Когда заходят', {
+    views: [{ state: 'frozen', ySplit: 1 }],
+  });
+  whenSheet.mergeCells('A1:E1');
+  whenSheet.getCell('A1').value = summary.whenPhrase || 'Когда заходят на сайт';
+  whenSheet.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF134E4A' } };
+  whenSheet.getRow(1).height = 24;
+  whenSheet.addRow([]);
+  const whenHeaders = ['День недели', 'Визиты', 'Звонки', 'Час-пик', 'Окно (со скольки до скольки)'];
+  whenSheet.addRow(whenHeaders);
+  paintHeaderRow(whenSheet.getRow(3));
+  whenSheet.columns = [
+    { width: 16 },
+    { width: 12 },
+    { width: 12 },
+    { width: 12 },
+    { width: 28 },
+  ];
+  (summary.weekdayReport || []).forEach((row, index) => {
+    const excelRow = whenSheet.addRow([
+      row.dayFull,
+      row.visits || 0,
+      row.calls || 0,
+      row.peakHour == null ? '—' : `${String(row.peakHour).padStart(2, '0')}:00`,
+      row.windowLabel || '—',
+    ]);
+    paintBodyRow(excelRow, { dateCol: 1, zebra: index % 2 === 1 });
+  });
+
+  const heatSheet = workbook.addWorksheet('Теплокарта', {
+    views: [{ state: 'frozen', ySplit: 1, xSplit: 1 }],
+  });
+  heatSheet.getCell('A1').value = 'Когда заходят (чем темнее — тем больше). Москва.';
+  heatSheet.getCell('A1').font = { bold: true, size: 13, color: { argb: 'FF134E4A' } };
+  heatSheet.mergeCells(1, 1, 1, (summary.heatmap?.hours?.length || 0) + 1);
+  const heatHeader = ['День', ...(summary.heatmap?.hours || []).map((h) => String(h).padStart(2, '0'))];
+  heatSheet.addRow([]);
+  heatSheet.addRow(heatHeader);
+  paintHeaderRow(heatSheet.getRow(3));
+  heatSheet.getColumn(1).width = 14;
+  (summary.heatmap?.hours || []).forEach((_, idx) => {
+    heatSheet.getColumn(idx + 2).width = 5;
+  });
+  const heatMax = summary.heatmap?.max || 0;
+  (summary.heatmap?.days || []).forEach((day) => {
+    const excelRow = heatSheet.addRow([day.labelFull, ...day.cells]);
+    excelRow.getCell(1).fill = DATE_FILL;
+    excelRow.getCell(1).font = { bold: true, color: { argb: 'FF134E4A' } };
+    day.cells.forEach((value, idx) => {
+      const cell = excelRow.getCell(idx + 2);
+      cell.value = value || '';
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: heatColor(value, heatMax) },
+      };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.font = {
+        bold: value > 0,
+        color: { argb: value / Math.max(heatMax, 1) > 0.55 ? 'FFFFFFFF' : 'FF134E4A' },
+      };
+    });
+  });
+
+  const attentionSheet = workbook.addWorksheet('Внимание');
+  attentionSheet.getCell('A1').value = 'Куда люди смотрят дольше';
+  attentionSheet.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF134E4A' } };
+  attentionSheet.addRow([]);
+  attentionSheet.addRow(['Блок', 'Секунд', 'Раз', 'Доля %']);
+  paintHeaderRow(attentionSheet.getRow(3));
+  attentionSheet.columns = [{ width: 14 }, { width: 12 }, { width: 10 }, { width: 12 }];
+  const attentionTotal =
+    (summary.scheduleSec || 0) + (summary.priceSec || 0) + (summary.reviewSec || 0) || 1;
+  const attentionRows = [
+    ['График', summary.scheduleSec || 0, summary.scheduleViews || 0],
+    ['Цены', summary.priceSec || 0, summary.priceViews || 0],
+    ['Отзывы', summary.reviewSec || 0, summary.reviewViews || 0],
+  ];
+  attentionRows.forEach((item, index) => {
+    const pct = Math.round((item[1] / attentionTotal) * 1000) / 10;
+    const excelRow = attentionSheet.addRow([item[0], item[1], item[2], pct]);
+    paintBodyRow(excelRow, { dateCol: 1, zebra: index % 2 === 1 });
+  });
+  attentionSheet.addRow([]);
+  attentionSheet.addRow([
+    'Итог',
+    summary.attention?.topLabel
+      ? `Больше всего внимания: ${summary.attention.topLabel}`
+      : 'Пока мало данных',
+  ]);
+
+  try {
+    const donutPng = await buildAttentionDonutPng(summary);
+    const imageId = workbook.addImage({
+      buffer: donutPng,
+      extension: 'png',
+    });
+    attentionSheet.addImage(imageId, {
+      tl: { col: 5, row: 1 },
+      ext: { width: 320, height: 420 },
+    });
+  } catch (error) {
+    console.error('attention_donut_error', error);
+  }
+
   const eventsSheet = workbook.addWorksheet('События', {
     views: [{ state: 'frozen', ySplit: 1, xSplit: 1 }],
   });
@@ -785,4 +1011,45 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
 
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);
+}
+
+async function buildAttentionDonutPng(summary) {
+  const parts = [
+    { label: 'График', value: summary.scheduleSec || 0, color: '#0f766e' },
+    { label: 'Цены', value: summary.priceSec || 0, color: '#f59e0b' },
+    { label: 'Отзывы', value: summary.reviewSec || 0, color: '#38bdf8' },
+  ];
+  const total = parts.reduce((a, b) => a + b.value, 0) || 1;
+  const cx = 160;
+  const cy = 160;
+  const r = 90;
+  const stroke = 44;
+  const circumference = 2 * Math.PI * r;
+  let offset = 0;
+  const circles = parts
+    .map((part) => {
+      const len = (part.value / total) * circumference;
+      const circle = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${part.color}" stroke-width="${stroke}" stroke-dasharray="${len} ${circumference - len}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})" />`;
+      offset += len;
+      return circle;
+    })
+    .join('');
+  const legend = parts
+    .map((part, index) => {
+      const y = 330 + index * 28;
+      const pct = Math.round((part.value / total) * 100);
+      return `<rect x="40" y="${y}" width="16" height="16" rx="3" fill="${part.color}"/><text x="66" y="${y + 13}" font-family="Arial,sans-serif" font-size="14" fill="#134e4a">${part.label}: ${part.value} сек (${pct}%)</text>`;
+    })
+    .join('');
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="420" viewBox="0 0 320 420">
+  <rect width="320" height="420" fill="#ffffff"/>
+  <text x="160" y="36" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="#134e4a">Куда смотрят дольше</text>
+  ${circles}
+  <circle cx="${cx}" cy="${cy}" r="${r - stroke / 2 - 6}" fill="#ffffff"/>
+  <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-family="Arial,sans-serif" font-size="15" fill="#134e4a">внимание</text>
+  <text x="${cx}" y="${cy + 20}" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" fill="#0f766e">${total} сек</text>
+  ${legend}
+</svg>`;
+  return sharp(Buffer.from(svg)).png().toBuffer();
 }
