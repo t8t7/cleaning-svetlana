@@ -403,7 +403,7 @@
         return;
       }
       devicesEl.innerHTML = items.map((item) => {
-        const title = item.label || item.brand || item.name || item.model || item.id;
+        const title = item.brand || item.model || item.name || item.id;
         const phoneLine = [
           item.brand ? `Марка: ${item.brand}` : null,
           item.model ? `Модель: ${item.model}` : null,
@@ -750,7 +750,7 @@
           if (input) input.value = savedLabel;
           const titleEl = card.querySelector('[data-device-title]');
           if (titleEl) {
-            titleEl.textContent = savedLabel || saved.brand || saved.name || saved.model || id;
+            titleEl.textContent = saved.brand || saved.model || saved.name || id;
           }
           await refresh();
           toast('Метка сохранена');
