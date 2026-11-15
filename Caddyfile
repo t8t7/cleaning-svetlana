@@ -1,13 +1,36 @@
 :80 {
+	header {
+		-Server
+		-Via
+		-X-Powered-By
+	}
+
 	@availabilityStream path /api/availability/stream
 	handle @availabilityStream {
 		reverse_proxy web:3000 {
 			flush_interval -1
+			header_down -Server
+			header_down -X-Powered-By
+			handle_response {
+				header -Via
+				header -X-Powered-By
+				header -Server
+				copy_response
+			}
 		}
 	}
 
 	handle {
 		encode gzip zstd
-		reverse_proxy web:3000
+		reverse_proxy web:3000 {
+			header_down -Server
+			header_down -X-Powered-By
+			handle_response {
+				header -Via
+				header -X-Powered-By
+				header -Server
+				copy_response
+			}
+		}
 	}
 }

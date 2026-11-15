@@ -11,6 +11,8 @@ test-fas.ru {
 		Content-Security-Policy "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self'; object-src 'none'"
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 		-Server
+		-Via
+		-X-Powered-By
 	}
 
 	# SSE must bypass gzip and flush immediately (availability + prices + works).
@@ -18,6 +20,14 @@ test-fas.ru {
 	handle @sseStreams {
 		reverse_proxy 127.0.0.1:3000 {
 			flush_interval -1
+			header_down -Server
+			header_down -X-Powered-By
+			handle_response {
+				header -Via
+				header -X-Powered-By
+				header -Server
+				copy_response
+			}
 		}
 	}
 
@@ -26,11 +36,28 @@ test-fas.ru {
 	handle @apkDownload {
 		reverse_proxy 127.0.0.1:3000 {
 			flush_interval -1
+			header_down -Server
+			header_down -X-Powered-By
+			handle_response {
+				header -Via
+				header -X-Powered-By
+				header -Server
+				copy_response
+			}
 		}
 	}
 
 	handle {
 		encode gzip zstd
-		reverse_proxy 127.0.0.1:3000
+		reverse_proxy 127.0.0.1:3000 {
+			header_down -Server
+			header_down -X-Powered-By
+			handle_response {
+				header -Via
+				header -X-Powered-By
+				header -Server
+				copy_response
+			}
+		}
 	}
 }
