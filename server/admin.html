@@ -496,7 +496,7 @@
         ? `Больше всего внимания: ${s.attention.topLabel}.`
         : 'Пока мало данных по зависаниям.';
       document.getElementById('statsMeta').textContent =
-        `С ${fmt(data.from)} по ${fmt(data.to)}. ${topLine} Считаем только если человек держал блок на экране от 3 сек.`;
+        `С ${fmt(data.from)} по ${fmt(data.to)}. ${topLine}`;
       document.getElementById('statsCards').innerHTML = [
         ['Визиты', s.visits],
         ['Уникальные', s.unique],
