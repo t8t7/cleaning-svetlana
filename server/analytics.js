@@ -4,30 +4,34 @@ import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ExcelJS from 'exceljs';
+import opentype from 'opentype.js';
 import sharp from 'sharp';
 
 const ANALYTICS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DONUT_FONT_REGULAR = path.join(ANALYTICS_DIR, 'assets', 'fonts', 'DejaVuSans.ttf');
 const DONUT_FONT_BOLD = path.join(ANALYTICS_DIR, 'assets', 'fonts', 'DejaVuSans-Bold.ttf');
 
-let donutFontCssCache = null;
+let donutFontsCache = null;
 
-function getDonutFontCss() {
-  if (donutFontCssCache) return donutFontCssCache;
-  const regular = fs.readFileSync(DONUT_FONT_REGULAR).toString('base64');
-  const bold = fs.readFileSync(DONUT_FONT_BOLD).toString('base64');
-  donutFontCssCache = `@font-face{font-family:'DonutSans';src:url(data:font/ttf;base64,${regular}) format('truetype');}
-@font-face{font-family:'DonutSans';font-weight:700;src:url(data:font/ttf;base64,${bold}) format('truetype');}`;
-  return donutFontCssCache;
+function loadDonutFonts() {
+  if (donutFontsCache) return donutFontsCache;
+  donutFontsCache = {
+    regular: opentype.loadSync(DONUT_FONT_REGULAR),
+    bold: opentype.loadSync(DONUT_FONT_BOLD),
+  };
+  return donutFontsCache;
 }
 
-function escapeXml(value) {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;');
+/** Convert text to SVG path so sharp/Alpine never needs system Cyrillic fonts. */
+function textPath(text, { x, y, size = 14, bold = false, anchor = 'start', fill = '#134e4a' }) {
+  const fonts = loadDonutFonts();
+  const font = bold ? fonts.bold : fonts.regular;
+  const width = font.getAdvanceWidth(text, size);
+  let startX = x;
+  if (anchor === 'middle') startX = x - width / 2;
+  if (anchor === 'end') startX = x - width;
+  const pathData = font.getPath(text, startX, y, size).toPathData(2);
+  return `<path d="${pathData}" fill="${fill}"/>`;
 }
 
 export const EVENT_TYPES = new Set([
@@ -1052,7 +1056,6 @@ async function buildAttentionDonutPng(summary) {
   const stroke = 44;
   const circumference = 2 * Math.PI * r;
   let offset = 0;
-  const fontCss = getDonutFontCss();
   const circles = parts
     .map((part) => {
       const len = (part.value / total) * circumference;
@@ -1065,20 +1068,17 @@ async function buildAttentionDonutPng(summary) {
     .map((part, index) => {
       const y = 340 + index * 28;
       const pct = Math.round((part.value / total) * 100);
-      return `<rect x="40" y="${y}" width="16" height="16" rx="3" fill="${part.color}"/><text x="66" y="${y + 13}" font-family="DonutSans, DejaVu Sans, sans-serif" font-size="14" fill="#134e4a">${escapeXml(part.label)}: ${part.value} сек (${pct}%)</text>`;
+      return `<rect x="40" y="${y}" width="16" height="16" rx="3" fill="${part.color}"/>${textPath(`${part.label}: ${part.value} сек (${pct}%)`, { x: 66, y: y + 13, size: 14, fill: '#134e4a' })}`;
     })
     .join('');
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="320" height="430" viewBox="0 0 320 430">
-  <defs><style type="text/css"><![CDATA[
-${fontCss}
-  ]]></style></defs>
   <rect width="320" height="430" fill="#ffffff"/>
-  <text x="160" y="36" text-anchor="middle" font-family="DonutSans, DejaVu Sans, sans-serif" font-size="18" font-weight="700" fill="#134e4a">Куда смотрят дольше</text>
+  ${textPath('Куда смотрят дольше', { x: cx, y: 36, size: 18, bold: true, anchor: 'middle', fill: '#134e4a' })}
   ${circles}
   <circle cx="${cx}" cy="${cy}" r="${r - stroke / 2 - 6}" fill="#ffffff"/>
-  <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-family="DonutSans, DejaVu Sans, sans-serif" font-size="15" fill="#134e4a">внимание</text>
-  <text x="${cx}" y="${cy + 20}" text-anchor="middle" font-family="DonutSans, DejaVu Sans, sans-serif" font-size="13" fill="#0f766e">${total} сек</text>
+  ${textPath('внимание', { x: cx, y: cy - 2, size: 15, anchor: 'middle', fill: '#134e4a' })}
+  ${textPath(`${total} сек`, { x: cx, y: cy + 20, size: 13, anchor: 'middle', fill: '#0f766e' })}
   ${legend}
 </svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
