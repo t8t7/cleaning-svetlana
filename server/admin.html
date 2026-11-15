@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex,nofollow" />
-  <title>Админка — Светлана</title>
+  <title></title>
   <style>
     :root {
       --bg: #0b1f1c;
@@ -96,24 +96,96 @@
       border: 1px solid #10b981; display: none; z-index: 20;
     }
     .toast.err { background: #7f1d1d; border-color: #fb7185; }
+    .ask {
+      position: fixed; inset: 0; z-index: 30;
+      display: grid; place-items: center;
+      background: rgba(4, 16, 14, 0.72);
+      padding: 1rem;
+    }
+    .ask-card {
+      width: min(100%, 24rem);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 1.1rem;
+    }
+    .ask-card p { margin: 0 0 1rem; line-height: 1.45; }
     .login-box { max-width: 420px; margin: 12vh auto; }
+    .mask { -webkit-text-security: disc; }
+    .login-box img.qr { display: block; width: 220px; height: 220px; background: #fff; border-radius: 12px; margin: 0.75rem auto; }
+    a.google-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 0.9rem;
+      width: 100%;
+      text-decoration: none;
+      border-radius: 10px;
+      padding: 0.75rem 0.9rem;
+      font-weight: 700;
+      background: #fff;
+      color: #1f2937;
+      border: 1px solid #d1d5db;
+    }
+    a.google-btn:hover { background: #f8fafc; }
     .hidden { display: none !important; }
     .meta { font-size: 0.85rem; color: var(--muted); line-height: 1.45; }
     .token-box {
       margin-top: 0.75rem; padding: 0.75rem; border-radius: 12px;
       background: #052e29; border: 1px dashed #34d399;
     }
+    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .tabs button {
+      background: #234e47;
+      color: var(--text);
+      font-weight: 600;
+    }
+    .tabs button.active { background: var(--accent); color: #042f2e; }
+    .stat-grid {
+      display: grid;
+      gap: 0.75rem;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      margin: 0.85rem 0;
+    }
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0.85rem;
+    }
+    .stat-card strong { display: block; font-size: 1.35rem; margin-top: 0.25rem; }
+    .bars { display: grid; gap: 0.35rem; margin-top: 0.75rem; }
+    .bar-row { display: grid; grid-template-columns: 2.5rem 1fr 2.5rem; gap: 0.45rem; align-items: center; font-size: 0.85rem; }
+    .bar-track { height: 8px; background: #0f2925; border-radius: 999px; overflow: hidden; }
+    .bar-fill { height: 100%; background: var(--accent); border-radius: 999px; }
+    .feed { list-style: none; margin: 0.75rem 0 0; padding: 0; display: grid; gap: 0.45rem; }
+    .feed li {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0.55rem 0.7rem;
+      font-size: 0.9rem;
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <section id="loginView" class="panel login-box">
-      <h1>Админка</h1>
-      <p class="muted">Управление доступом хозяина и устройствами APK.</p>
-      <label for="password">Пароль администратора</label>
-      <input id="password" type="password" autocomplete="current-password" />
-      <div class="row" style="margin-top:0.75rem">
-        <button id="loginBtn" type="button">Войти</button>
+      <div id="gate" class="hidden">
+        <input id="f1" class="mask" type="text" autocomplete="off" spellcheck="false" />
+        <div id="f2box" class="hidden">
+          <input id="f2" class="mask" type="text" autocomplete="off" spellcheck="false" style="margin-top:0.75rem" />
+        </div>
+        <div class="row" style="margin-top:0.75rem">
+          <button id="loginBtn" type="button">Войти</button>
+        </div>
+      </div>
+      <div id="setupBox" class="hidden">
+        <img id="qr" class="qr" alt="" width="220" height="220" />
+        <input id="f3" class="mask" type="text" autocomplete="off" spellcheck="false" />
+        <div class="row" style="margin-top:0.75rem">
+          <button id="confirmTotp" type="button">Подтвердить</button>
+        </div>
       </div>
       <p id="loginError" class="meta" style="color:var(--danger);margin-top:0.75rem"></p>
     </section>
@@ -122,7 +194,7 @@
       <div class="top">
         <div>
           <h1>Панель управления</h1>
-          <p class="muted">Устройства APK, блокировка и смена токена хозяина.</p>
+          <p class="muted" id="whoami">Устройства APK, блокировка и смена токена хозяина.</p>
         </div>
         <div class="row">
           <button class="secondary" id="refreshBtn" type="button">Обновить</button>
@@ -130,56 +202,123 @@
         </div>
       </div>
 
-      <section class="panel">
-        <h2>Доступ хозяина</h2>
-        <p class="meta" id="accessMeta">Загрузка…</p>
-        <div class="row" style="margin-top:0.75rem">
-          <button class="warn" id="rotateBtn" type="button">Сгенерировать новый токен</button>
-        </div>
-        <div id="tokenResult" class="token-box hidden">
-          <div class="meta">Новый токен уже на сервере. Разрешённые телефоны подхватят его сами (обычно до минуты).</div>
-          <div class="mono" id="tokenValue" style="margin-top:0.5rem"></div>
-          <div class="row" style="margin-top:0.6rem">
-            <button class="secondary" id="copyTokenBtn" type="button">Скопировать</button>
+      <div class="tabs" role="tablist">
+        <button type="button" class="active" data-tab="devices" id="tabDevices">Устройства</button>
+        <button type="button" data-tab="stats" id="tabStats">Статистика</button>
+      </div>
+
+      <div id="tabPanelDevices">
+        <section class="panel">
+          <h2>Доступ хозяина</h2>
+          <p class="meta" id="accessMeta">Загрузка…</p>
+          <div class="row" style="margin-top:0.75rem">
+            <button class="warn" id="rotateBtn" type="button">Сгенерировать новый токен</button>
           </div>
-        </div>
-      </section>
+          <div id="tokenResult" class="token-box hidden">
+            <div class="meta">Новый токен уже на сервере. Разрешённые телефоны подхватят его сами (обычно до минуты).</div>
+            <div class="mono" id="tokenValue" style="margin-top:0.5rem"></div>
+            <div class="row" style="margin-top:0.6rem">
+              <button class="secondary" id="copyTokenBtn" type="button">Скопировать</button>
+            </div>
+          </div>
+        </section>
 
-      <section class="panel">
-        <h2>Сообщение в APK хозяина</h2>
-        <p class="meta">Короткий баннер в приложении: оплата, напоминание и т.п. Хозяин видит компактно сверху, без модалок.</p>
-        <label for="noticeText">Текст (до 280 символов)</label>
-        <textarea id="noticeText" maxlength="280" placeholder="Например: через 2 недели нужна оплата, иначе доступ будет приостановлен."></textarea>
-        <label for="noticeTone" style="margin-top:0.7rem">Цвет / важность</label>
-        <select id="noticeTone">
-          <option value="info">Спокойно (бирюзовый)</option>
-          <option value="warn" selected>Важно (янтарный)</option>
-          <option value="urgent">Срочно (коралловый)</option>
-        </select>
-        <p class="meta" id="noticeMeta" style="margin-top:0.65rem">Сейчас сообщения нет.</p>
-        <div class="row" style="margin-top:0.75rem">
-          <button id="saveNoticeBtn" type="button">Показать в APK</button>
-          <button class="danger" id="clearNoticeBtn" type="button">Убрать сообщение</button>
-        </div>
-      </section>
+        <section class="panel">
+          <h2>Сообщение в APK хозяина</h2>
+          <p class="meta">Короткий баннер в приложении: оплата, напоминание и т.п. Хозяин видит компактно сверху, без модалок.</p>
+          <label for="noticeText">Текст (до 280 символов)</label>
+          <textarea id="noticeText" maxlength="280" placeholder="Например: через 2 недели нужна оплата, иначе доступ будет приостановлен."></textarea>
+          <label for="noticeTone" style="margin-top:0.7rem">Цвет / важность</label>
+          <select id="noticeTone">
+            <option value="info">Спокойно (бирюзовый)</option>
+            <option value="warn" selected>Важно (янтарный)</option>
+            <option value="urgent">Срочно (коралловый)</option>
+          </select>
+          <p class="meta" id="noticeMeta" style="margin-top:0.65rem">Сейчас сообщения нет.</p>
+          <div class="row" style="margin-top:0.75rem">
+            <button id="saveNoticeBtn" type="button">Показать в APK</button>
+            <button class="danger" id="clearNoticeBtn" type="button">Убрать сообщение</button>
+          </div>
+        </section>
 
-      <section class="panel">
-        <div class="row" style="justify-content:space-between;margin-bottom:0.5rem">
-          <h2 style="margin:0">Устройства</h2>
-          <span class="badge" id="deviceCount">0</span>
-        </div>
-        <p class="meta">Имя с телефона приходит само. Рядом можешь написать метку вроде «Светлана» или «неизвестный» и сразу заблокировать.</p>
-        <div id="devices" class="grid" style="margin-top:0.85rem"></div>
-      </section>
+        <section class="panel">
+          <div class="row" style="justify-content:space-between;margin-bottom:0.5rem">
+            <h2 style="margin:0">Устройства</h2>
+            <span class="badge" id="deviceCount">0</span>
+          </div>
+          <p class="meta">Имя с телефона приходит само. Рядом можешь написать метку вроде «Светлана» или «неизвестный» и сразу заблокировать.</p>
+          <div id="devices" class="grid" style="margin-top:0.85rem"></div>
+        </section>
+      </div>
+
+      <div id="tabPanelStats" class="hidden">
+        <section class="panel">
+          <div class="row" style="justify-content:space-between;align-items:flex-end">
+            <div>
+              <h2 style="margin:0">Статистика сайта</h2>
+              <p class="meta" id="statsMeta" style="margin-top:0.35rem">Загрузка…</p>
+            </div>
+            <div class="row">
+              <button class="secondary" id="exportStatsBtn" type="button">Скачать Excel</button>
+            </div>
+          </div>
+          <div class="row" style="margin-top:0.85rem">
+            <label class="grow" style="margin:0">
+              Период
+              <select id="statsPeriod">
+                <option value="today">Сегодня</option>
+                <option value="7d">7 дней</option>
+                <option value="30d" selected>30 дней</option>
+                <option value="halfyear">Полгода</option>
+              </select>
+            </label>
+            <label class="grow" style="margin:0">
+              С
+              <input id="statsFrom" type="date" />
+            </label>
+            <label class="grow" style="margin:0">
+              По
+              <input id="statsTo" type="date" />
+            </label>
+            <button id="loadStatsBtn" type="button">Показать</button>
+          </div>
+          <div class="stat-grid" id="statsCards"></div>
+          <div class="grid">
+            <div>
+              <h2>Источники</h2>
+              <div class="bars" id="statsSources"></div>
+            </div>
+            <div>
+              <h2>Устройства</h2>
+              <div class="bars" id="statsDevices"></div>
+            </div>
+          </div>
+          <h2 style="margin-top:1rem">По часам (Москва)</h2>
+          <div class="bars" id="statsHours"></div>
+          <h2 style="margin-top:1rem">Последние действия</h2>
+          <ul class="feed" id="statsFeed"></ul>
+        </section>
+      </div>
     </section>
   </div>
 
   <div id="toast" class="toast"></div>
+  <div id="ask" class="ask hidden" role="dialog" aria-modal="true">
+    <div class="ask-card">
+      <p id="askText"></p>
+      <div class="row">
+        <button id="askOk" type="button">Да</button>
+        <button id="askNo" class="secondary" type="button">Отмена</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const loginView = document.getElementById('loginView');
     const appView = document.getElementById('appView');
     const loginError = document.getElementById('loginError');
+    const gate = document.getElementById('gate');
+    const whoami = document.getElementById('whoami');
     const devicesEl = document.getElementById('devices');
     const accessMeta = document.getElementById('accessMeta');
     const deviceCount = document.getElementById('deviceCount');
@@ -189,6 +328,20 @@
     const noticeTone = document.getElementById('noticeTone');
     const noticeMeta = document.getElementById('noticeMeta');
     const toastEl = document.getElementById('toast');
+    let activeTab = 'devices';
+    let statsQuery = { period: '30d' };
+
+    const ask = (text) => new Promise((resolve) => {
+      const box = document.getElementById('ask');
+      const finish = (value) => {
+        box.classList.add('hidden');
+        resolve(value);
+      };
+      document.getElementById('askText').textContent = text;
+      document.getElementById('askOk').onclick = () => finish(true);
+      document.getElementById('askNo').onclick = () => finish(false);
+      box.classList.remove('hidden');
+    });
 
     const toast = (text, err = false) => {
       toastEl.textContent = text;
@@ -277,8 +430,94 @@
         : 'Сейчас сообщения нет.';
     };
 
+    const setTab = (name) => {
+      activeTab = name;
+      document.getElementById('tabPanelDevices').classList.toggle('hidden', name !== 'devices');
+      document.getElementById('tabPanelStats').classList.toggle('hidden', name !== 'stats');
+      document.querySelectorAll('.tabs [data-tab]').forEach((btn) => {
+        btn.classList.toggle('active', btn.getAttribute('data-tab') === name);
+      });
+      if (name === 'stats') refreshStats().catch((error) => toast(error.message, true));
+    };
+
+    const barsHtml = (items) => {
+      const max = Math.max(1, ...items.map((item) => item.count));
+      return items.map((item) => `
+        <div class="bar-row">
+          <span>${escapeHtml(item.label)}</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.round((item.count / max) * 100)}%"></div></div>
+          <span>${item.count}</span>
+        </div>
+      `).join('');
+    };
+
+    const refreshStats = async () => {
+      const params = new URLSearchParams();
+      if (statsQuery.from && statsQuery.to) {
+        params.set('from', statsQuery.from);
+        params.set('to', statsQuery.to);
+      } else {
+        params.set('period', statsQuery.period || '30d');
+      }
+      const data = await api(`__PANEL__/api/analytics?${params}`);
+      const s = data.summary || {};
+      document.getElementById('statsMeta').textContent =
+        `С ${fmt(data.from)} по ${fmt(data.to)}`;
+      document.getElementById('statsCards').innerHTML = [
+        ['Визиты', s.visits],
+        ['Уникальные', s.unique],
+        ['Звонки', s.calls],
+        ['Конверсия %', s.conversion],
+        ['График', s.scheduleViews],
+        ['Цены', s.priceViews],
+        ['Фото', s.photoOpens],
+        ['Заявки', s.leads],
+      ].map(([label, value]) => `
+        <div class="stat-card">
+          <span class="meta">${escapeHtml(label)}</span>
+          <strong>${escapeHtml(String(value ?? 0))}</strong>
+        </div>
+      `).join('');
+
+      const sourceLabels = s.labels?.sources || {};
+      document.getElementById('statsSources').innerHTML = barsHtml(
+        Object.entries(s.sources || {}).map(([key, count]) => ({
+          label: sourceLabels[key] || key,
+          count,
+        }))
+      );
+      const deviceLabels = s.labels?.devices || {};
+      document.getElementById('statsDevices').innerHTML = barsHtml(
+        Object.entries(s.devices || {}).map(([key, count]) => ({
+          label: deviceLabels[key] || key,
+          count,
+        }))
+      );
+      document.getElementById('statsHours').innerHTML = barsHtml(
+        (s.byHour || []).map((count, hour) => ({
+          label: `${String(hour).padStart(2, '0')}`,
+          count,
+        })).filter((item) => item.count > 0).slice(0, 24)
+      );
+      const feed = document.getElementById('statsFeed');
+      const recent = s.recent || [];
+      feed.innerHTML = recent.length
+        ? recent.map((item) => `
+            <li>
+              <strong>${escapeHtml(item.label)}</strong>
+              · ${escapeHtml(item.deviceLabel)}
+              · ${escapeHtml(item.sourceLabel)}
+              <div class="meta">${escapeHtml(fmt(item.at))}</div>
+            </li>
+          `).join('')
+        : '<li class="meta">Пока нет событий за этот период.</li>';
+    };
+
     const refresh = async () => {
-      const data = await api('/admin/api/overview');
+      const data = await api('__PANEL__/api/overview');
+      whoami.textContent = data.adminEmail
+        ? `Вход: ${data.adminEmail}`
+        : 'Устройства APK, блокировка и смена токена хозяина.';
       accessMeta.textContent =
         `Версия токена: ${data.access.tokenVersion}. Обновлён: ${fmt(data.access.updatedAt)}.` +
         (data.access.hasPreviousGrace
@@ -286,6 +525,7 @@
           : '');
       renderNotice(data.notice || { active: false });
       renderDevices(data.devices || []);
+      if (activeTab === 'stats') await refreshStats();
     };
 
     const showApp = async () => {
@@ -294,23 +534,121 @@
       await refresh();
     };
 
+    const prepareLogin = async () => {
+      if (new URLSearchParams(location.search).has('error')) history.replaceState({}, '', '__PANEL__');
+      try {
+        const cfg = await api('__PANEL__/api/auth-config');
+        gate.classList.toggle('hidden', cfg.f !== 1 && cfg.f !== 2);
+        document.getElementById('f2box').classList.toggle('hidden', cfg.f !== 2);
+        document.getElementById('setupBox').classList.add('hidden');
+      } catch (error) {
+        loginError.textContent = 'Нет';
+      }
+    };
+
     document.getElementById('loginBtn').addEventListener('click', async () => {
       loginError.textContent = '';
       try {
-        await api('/admin/api/login', {
+        const data = await api('__PANEL__/api/login', {
           method: 'POST',
-          body: JSON.stringify({ password: document.getElementById('password').value }),
+          body: JSON.stringify({
+            k: document.getElementById('f1').value,
+            n: document.getElementById('f2').value,
+          }),
+        });
+        if (data.q) {
+          gate.classList.add('hidden');
+          document.getElementById('setupBox').classList.remove('hidden');
+          document.getElementById('qr').src = data.q;
+          return;
+        }
+        await showApp();
+      } catch (error) {
+        loginError.textContent = 'Нет';
+      }
+    });
+
+    document.getElementById('f1').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') document.getElementById('loginBtn').click();
+    });
+
+    document.getElementById('confirmTotp').addEventListener('click', async () => {
+      loginError.textContent = '';
+      try {
+        await api('__PANEL__/api/totp/confirm', {
+          method: 'POST',
+          body: JSON.stringify({ n: document.getElementById('f3').value }),
         });
         await showApp();
       } catch (error) {
-        loginError.textContent = error.message || 'Не удалось войти';
+        loginError.textContent = 'Нет';
       }
     });
 
     document.getElementById('logoutBtn').addEventListener('click', async () => {
-      await api('/admin/api/logout', { method: 'POST' });
+      await api('__PANEL__/api/logout', { method: 'POST' });
       appView.classList.add('hidden');
       loginView.classList.remove('hidden');
+      await prepareLogin();
+    });
+
+    document.querySelectorAll('.tabs [data-tab]').forEach((btn) => {
+      btn.addEventListener('click', () => setTab(btn.getAttribute('data-tab')));
+    });
+
+    document.getElementById('loadStatsBtn').addEventListener('click', async () => {
+      const from = document.getElementById('statsFrom').value;
+      const to = document.getElementById('statsTo').value;
+      if (from && to) {
+        statsQuery = {
+          from: new Date(`${from}T00:00:00+03:00`).toISOString(),
+          to: new Date(`${to}T23:59:59+03:00`).toISOString(),
+        };
+      } else {
+        statsQuery = { period: document.getElementById('statsPeriod').value || '30d' };
+      }
+      try {
+        await refreshStats();
+        toast('Статистика обновлена');
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+
+    document.getElementById('statsPeriod').addEventListener('change', () => {
+      document.getElementById('statsFrom').value = '';
+      document.getElementById('statsTo').value = '';
+    });
+
+    document.getElementById('exportStatsBtn').addEventListener('click', async () => {
+      const params = new URLSearchParams();
+      if (statsQuery.from && statsQuery.to) {
+        params.set('from', statsQuery.from);
+        params.set('to', statsQuery.to);
+      } else {
+        params.set('period', statsQuery.period || '30d');
+      }
+      try {
+        const res = await fetch(`__PANEL__/api/analytics/export?${params}`, {
+          credentials: 'same-origin',
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || `Ошибка ${res.status}`);
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `analytics-${new Date().toISOString().slice(0, 10)}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        toast('Excel скачан');
+      } catch (error) {
+        toast(error.message, true);
+      }
     });
 
     document.getElementById('refreshBtn').addEventListener('click', async () => {
@@ -323,9 +661,9 @@
     });
 
     document.getElementById('rotateBtn').addEventListener('click', async () => {
-      if (!confirm('Сгенерировать новый токен? Старый ещё немного поживёт, чтобы телефон хозяина успел его сменить сам.')) return;
+      if (!(await ask('Сгенерировать новый токен? Старый ещё немного поживёт, чтобы телефон хозяина успел его сменить сам.'))) return;
       try {
-        const data = await api('/admin/api/token/rotate', { method: 'POST' });
+        const data = await api('__PANEL__/api/token/rotate', { method: 'POST' });
         tokenValue.textContent = data.masterToken || '';
         tokenResult.classList.remove('hidden');
         await refresh();
@@ -346,7 +684,7 @@
 
     document.getElementById('saveNoticeBtn').addEventListener('click', async () => {
       try {
-        const data = await api('/admin/api/notice', {
+        const data = await api('__PANEL__/api/notice', {
           method: 'PUT',
           body: JSON.stringify({
             text: noticeText.value,
@@ -362,7 +700,7 @@
 
     document.getElementById('clearNoticeBtn').addEventListener('click', async () => {
       try {
-        const data = await api('/admin/api/notice', { method: 'DELETE' });
+        const data = await api('__PANEL__/api/notice', { method: 'DELETE' });
         renderNotice(data.notice || { active: false });
         toast('Сообщение убрано из APK');
       } catch (error) {
@@ -377,7 +715,7 @@
       try {
         if (event.target.matches('[data-save-label]')) {
           const label = card.querySelector('[data-label-input]')?.value || '';
-          await api(`/admin/api/devices/${encodeURIComponent(id)}`, {
+          await api(`__PANEL__/api/devices/${encodeURIComponent(id)}`, {
             method: 'PATCH',
             body: JSON.stringify({ label }),
           });
@@ -386,7 +724,7 @@
         }
         if (event.target.matches('[data-toggle-block]')) {
           const blocked = event.target.textContent.includes('В блок');
-          await api(`/admin/api/devices/${encodeURIComponent(id)}`, {
+          await api(`__PANEL__/api/devices/${encodeURIComponent(id)}`, {
             method: 'PATCH',
             body: JSON.stringify({ blocked }),
           });
@@ -394,8 +732,8 @@
           toast(blocked ? 'Устройство в блоке' : 'Устройство разблокировано');
         }
         if (event.target.matches('[data-remove]')) {
-          if (!confirm('Убрать устройство из списка?')) return;
-          await api(`/admin/api/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+          if (!(await ask('Убрать устройство из списка?'))) return;
+          await api(`__PANEL__/api/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
           await refresh();
           toast('Убрано из списка');
         }
@@ -404,7 +742,8 @@
       }
     });
 
-    api('/admin/api/overview')
+    prepareLogin();
+    api('__PANEL__/api/overview')
       .then(showApp)
       .catch(() => {
         /* stay on login */

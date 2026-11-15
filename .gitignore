@@ -13,6 +13,8 @@ dist/
 data/leads.jsonl
 data/*.json
 data/uploads/
+data/analytics/
+data/*.secret
 !data/.gitkeep
 
 # local QA dumps / binary releases (APK served from disk, not git)

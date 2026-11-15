@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 const COOKIE_NAME = 'sv_admin_session';
 const MAX_AGE_MS = 12 * 60 * 60 * 1000;
@@ -29,10 +31,12 @@ export function parseCookies(header) {
   return out;
 }
 
-export function createAdminSessionToken(secret) {
+export function createAdminSessionToken(secret, { email, method = 'google' }) {
   const payload = {
     exp: Date.now() + MAX_AGE_MS,
     nonce: crypto.randomBytes(8).toString('hex'),
+    email: String(email || '').trim().toLowerCase(),
+    method: method === 'password' || method === 'totp-setup' ? method : 'google',
   };
   const body = b64url(JSON.stringify(payload));
   const sig = crypto.createHmac('sha256', secret).update(body).digest('base64url');
@@ -40,30 +44,88 @@ export function createAdminSessionToken(secret) {
 }
 
 export function verifyAdminSessionToken(token, secret) {
-  if (!token || !secret) return false;
+  if (!token || !secret) return null;
   const [body, sig] = String(token).split('.');
-  if (!body || !sig) return false;
+  if (!body || !sig || String(token).split('.').length !== 2) return null;
   const expected = crypto.createHmac('sha256', secret).update(body).digest('base64url');
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
     const payload = JSON.parse(fromB64url(body));
-    return Number(payload.exp) > Date.now();
+    const email = String(payload.email || '').trim().toLowerCase();
+    const method = payload.method === 'password' || payload.method === 'totp-setup' ? payload.method : 'google';
+    if (!email || !email.includes('@')) return null;
+    if (!(Number(payload.exp) > Date.now())) return null;
+    return { email, method, exp: Number(payload.exp) };
   } catch {
-    return false;
+    return null;
   }
 }
 
-export function adminSessionCookie(token, { secure = true } = {}) {
-  const maxAge = Math.floor(MAX_AGE_MS / 1000);
-  const securePart = secure ? '; Secure' : '';
-  return `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/admin; HttpOnly; SameSite=Strict${securePart}; Max-Age=${maxAge}`;
+export async function ensureAdminSessionSecret(file, envValue) {
+  const fromEnv = String(envValue || '').trim();
+  if (fromEnv.length >= 32) return fromEnv;
+  try {
+    const existing = (await fs.readFile(file, 'utf8')).trim();
+    if (existing.length >= 32) return existing;
+  } catch {
+    /* create below */
+  }
+  const created = crypto.randomBytes(32).toString('hex');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, `${created}\n`, { mode: 0o600 });
+  return created;
 }
 
-export function clearAdminSessionCookie({ secure = true } = {}) {
+const RESERVED_PANEL_NAMES = new Set([
+  'admin',
+  'administrator',
+  'login',
+  'wp-admin',
+  'dashboard',
+  'panel',
+  'backend',
+  'manage',
+  'manager',
+  'cpanel',
+  'api',
+  'uploads',
+  'health',
+  'app-download',
+  'cdn',
+  'signin',
+  'auth',
+  'console',
+  'system',
+]);
+
+export function panelPath(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '';
+  const withSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  const normalized = withSlash.replace(/\/+$/, '');
+  const segment = normalized.slice(1);
+  if (!segment || segment.includes('/') || normalized.includes('//')) return '';
+  if (!/^[a-z0-9][a-z0-9-]{7,40}$/i.test(segment)) return '';
+  const lower = segment.toLowerCase();
+  if (lower.includes('admin') || RESERVED_PANEL_NAMES.has(lower)) return '';
+  return `/${segment}`;
+}
+
+export function adminSessionCookie(token, { secure = true, path } = {}) {
+  const cookiePath = panelPath(path);
+  if (!cookiePath) throw new Error('invalid panel cookie path');
+  const maxAge = Math.floor(MAX_AGE_MS / 1000);
   const securePart = secure ? '; Secure' : '';
-  return `${COOKIE_NAME}=; Path=/admin; HttpOnly; SameSite=Strict${securePart}; Max-Age=0`;
+  return `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=${cookiePath}; HttpOnly; SameSite=Strict${securePart}; Max-Age=${maxAge}`;
+}
+
+export function clearAdminSessionCookie({ secure = true, path } = {}) {
+  const cookiePath = panelPath(path);
+  if (!cookiePath) throw new Error('invalid panel cookie path');
+  const securePart = secure ? '; Secure' : '';
+  return `${COOKIE_NAME}=; Path=${cookiePath}; HttpOnly; SameSite=Strict${securePart}; Max-Age=0`;
 }
 
 export function readAdminSession(req, secret) {

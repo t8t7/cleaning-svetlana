@@ -8,6 +8,12 @@ services:
       PORT: 3000
       MASTER_TOKEN: ${MASTER_TOKEN:-change-me-master-token}
       APK_DOWNLOAD_PIN: ${APK_DOWNLOAD_PIN:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      ADMIN_GOOGLE_EMAILS: ${ADMIN_GOOGLE_EMAILS:-}
+      ADMIN_PUBLIC_ORIGIN: ${ADMIN_PUBLIC_ORIGIN:-https://test-fas.ru}
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:-}
+      ADMIN_PATH: ${ADMIN_PATH:-}
     volumes:
       - leads_data:/app/data
       - ./releases:/app/releases:ro

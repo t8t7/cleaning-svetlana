@@ -59,19 +59,52 @@ import {
   adminSessionCookie,
   clearAdminSessionCookie,
   createAdminSessionToken,
+  ensureAdminSessionSecret,
+  panelPath,
+  parseCookies,
   readAdminSession,
 } from './adminAuth.js';
+import {
+  adminPublicOrigin,
+  clearOAuthStateCookie,
+  createOAuthTransaction,
+  emailAllowed,
+  exchangeGoogleCode,
+  googleAuthorizeUrl,
+  googleRedirectUri,
+  oauthStateCookie,
+  OAUTH_COOKIE,
+  parseAdminEmails,
+  readOAuthTransaction,
+  verifyGoogleIdToken,
+} from './googleAdmin.js';
+import {
+  confirmTotp,
+  enrollmentQr,
+  loadOrCreateTotp,
+  totpStatus,
+  verifyTotpCode,
+} from './adminTotp.js';
 import {
   clearOwnerMessage,
   publicOwnerMessage,
   readOwnerMessage,
   setOwnerMessage,
 } from './ownerMessage.js';
+import {
+  appendAnalyticsEvent,
+  buildAnalyticsWorkbook,
+  normalizeEventInput,
+  parsePeriod,
+  readAnalyticsEvents,
+  summarizeAnalytics,
+} from './analytics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const distDir = path.join(root, 'dist');
 const dataDir = path.join(root, 'data');
+const analyticsDir = path.join(dataDir, 'analytics');
 const leadsFile = path.join(dataDir, 'leads.jsonl');
 const availabilityFile = path.join(dataDir, 'availability.json');
 const pricesFile = path.join(dataDir, 'prices.json');
@@ -88,8 +121,16 @@ const apkFile = path.join(releasesDir, 'svetlana-schedule.apk');
 const appVersionFile = path.join(releasesDir, 'app-version.json');
 const port = Number(process.env.PORT || 3000);
 const masterTokenEnv = String(process.env.MASTER_TOKEN || '').trim();
-const adminPassword = String(process.env.ADMIN_PASSWORD || '').trim();
 const apkDownloadPin = String(process.env.APK_DOWNLOAD_PIN || '').trim();
+const adminPassword = String(process.env.ADMIN_PASSWORD || '').trim();
+const googleClientId = String(process.env.GOOGLE_CLIENT_ID || '').trim();
+const googleClientSecret = String(process.env.GOOGLE_CLIENT_SECRET || '').trim();
+const adminEmails = parseAdminEmails(process.env.ADMIN_GOOGLE_EMAILS);
+const adminPublicOriginEnv = String(process.env.ADMIN_PUBLIC_ORIGIN || 'https://test-fas.ru').trim();
+const adminPath = panelPath(process.env.ADMIN_PATH);
+const adminSessionSecretFile = path.join(dataDir, 'admin-session.secret');
+const adminTotpFile = path.join(dataDir, 'admin-totp.json');
+let adminSessionSecret = '';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -155,6 +196,14 @@ const apkDownloadLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: 'Слишком много попыток. Попробуйте позже.',
+});
+
+const trackLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 180,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Слишком много запросов.' },
 });
 
 const upload = multer({
@@ -254,15 +303,43 @@ async function requireMasterToken(req, res, { requireDevice = false } = {}) {
   return true;
 }
 
+function googleAdminConfigured() {
+  return Boolean(adminPath && googleClientId && googleClientSecret && adminEmails.size && adminSessionSecret);
+}
+
+function cookieSecure(req) {
+  const host = String(req.get('host') || '').toLowerCase();
+  if (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) return false;
+  return true;
+}
+
+function passwordLoginEnabled() {
+  return Boolean(adminPath && adminSessionSecret && adminPassword && !googleAdminConfigured());
+}
+
 function requireAdmin(req, res) {
-  if (!adminPassword) {
-    res.status(503).json({ error: 'ADMIN_PASSWORD не настроен на сервере' });
+  if (!adminPath || !adminSessionSecret) {
+    res.status(503).json({ error: 'Панель не настроена на сервере' });
     return false;
   }
-  if (!readAdminSession(req, adminPassword)) {
-    res.status(401).json({ error: 'Нужен вход в админку' });
+  const session = readAdminSession(req, adminSessionSecret);
+  if (!session) {
+    res.status(401).json({ error: 'Нужен вход в панель' });
     return false;
   }
+  if (session.method === 'password') {
+    if (!passwordLoginEnabled()) {
+      res.status(401).json({ error: 'Нужен вход в панель' });
+      return false;
+    }
+    req.adminEmail = '';
+    return true;
+  }
+  if (!googleAdminConfigured() || !emailAllowed(session.email, adminEmails)) {
+    res.status(401).json({ error: 'Нужен вход в панель' });
+    return false;
+  }
+  req.adminEmail = session.email;
   return true;
 }
 
@@ -894,11 +971,13 @@ app.post('/api/device/sync', availabilityWriteLimiter, async (req, res) => {
   }
 });
 
-app.get('/admin', async (_req, res) => {
+const panel = express.Router();
+
+panel.get('/', async (_req, res) => {
   res.set('X-Robots-Tag', 'noindex, nofollow');
   res.set('Cache-Control', 'no-store');
   try {
-    const html = await fs.readFile(adminHtmlFile, 'utf8');
+    const html = (await fs.readFile(adminHtmlFile, 'utf8')).replaceAll('__PANEL__', adminPath);
     return res.type('html').send(html);
   } catch (error) {
     console.error('admin_html_error', error);
@@ -906,40 +985,145 @@ app.get('/admin', async (_req, res) => {
   }
 });
 
-app.post('/admin/api/login', async (req, res) => {
-  if (!adminPassword) {
-    return res.status(503).json({ error: 'ADMIN_PASSWORD не настроен на сервере' });
+const adminLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler(_req, res) {
+    res.status(429).type('text').send('Слишком много попыток входа. Попробуйте позже.');
+  },
+});
+
+panel.get('/api/auth-config', async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!passwordLoginEnabled()) return res.json({ ok: true, f: 0 });
+  const totp = await totpStatus(adminTotpFile);
+  return res.json({ ok: true, f: totp === 'active' ? 2 : 1 });
+});
+
+panel.post('/api/login', adminLoginLimiter, async (req, res) => {
+  if (!passwordLoginEnabled()) {
+    return res.status(404).json({ error: 'Нет' });
   }
-  const provided = String(req.body?.password || '');
-  const a = Buffer.from(provided);
-  const b = Buffer.from(adminPassword);
-  if (a.length === 0 || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    return res.status(401).json({ error: 'Неверный пароль' });
+  const secret = String(req.body?.k ?? req.body?.password ?? '');
+  if (!pinsMatch(secret, adminPassword)) {
+    return res.status(401).json({ error: 'Нет' });
   }
-  const token = createAdminSessionToken(adminPassword);
-  res.setHeader('Set-Cookie', adminSessionCookie(token, { secure: true }));
+  const state = await loadOrCreateTotp(adminTotpFile);
+  const secure = cookieSecure(req);
+  if (!state.confirmed) {
+    const { qr } = await enrollmentQr(state.secret);
+    const token = createAdminSessionToken(adminSessionSecret, { email: 'panel@local', method: 'totp-setup' });
+    res.setHeader('Set-Cookie', adminSessionCookie(token, { secure, path: adminPath }));
+    return res.json({ ok: true, q: qr });
+  }
+  const code = req.body?.n ?? req.body?.code;
+  if (!verifyTotpCode(state.secret, code)) {
+    return res.status(401).json({ error: 'Нет' });
+  }
+  const token = createAdminSessionToken(adminSessionSecret, { email: 'panel@local', method: 'password' });
+  res.setHeader('Set-Cookie', adminSessionCookie(token, { secure, path: adminPath }));
   return res.json({ ok: true });
 });
 
-app.post('/admin/api/logout', (_req, res) => {
-  res.setHeader('Set-Cookie', clearAdminSessionCookie());
+panel.post('/api/totp/confirm', adminLoginLimiter, async (req, res) => {
+  const session = readAdminSession(req, adminSessionSecret);
+  if (!session || session.method !== 'totp-setup') {
+    return res.status(401).json({ error: 'Нет' });
+  }
+  const ok = await confirmTotp(adminTotpFile, req.body?.n ?? req.body?.code);
+  if (!ok) {
+    return res.status(401).json({ error: 'Нет' });
+  }
+  const token = createAdminSessionToken(adminSessionSecret, { email: 'panel@local', method: 'password' });
+  res.setHeader('Set-Cookie', adminSessionCookie(token, { secure: cookieSecure(req), path: adminPath }));
   return res.json({ ok: true });
 });
 
-app.get('/admin/api/overview', async (req, res) => {
+panel.get('/api/google/start', adminLoginLimiter, (req, res) => {
+  if (!googleAdminConfigured()) {
+    return res.redirect(`${adminPath}?error=unconfigured`);
+  }
+  const tx = createOAuthTransaction(adminSessionSecret);
+  const origin = adminPublicOrigin(req, adminPublicOriginEnv);
+  const url = googleAuthorizeUrl({
+    clientId: googleClientId,
+    redirectUri: googleRedirectUri(origin, adminPath),
+    state: tx.state,
+    verifier: tx.verifier,
+  });
+  res.setHeader('Set-Cookie', oauthStateCookie(tx.token, { secure: cookieSecure(req), path: adminPath }));
+  return res.redirect(url);
+});
+
+panel.get('/api/google/callback', adminLoginLimiter, async (req, res) => {
+  const secure = cookieSecure(req);
+  const fail = (code) => {
+    res.setHeader('Set-Cookie', clearOAuthStateCookie({ secure, path: adminPath }));
+    return res.redirect(`${adminPath}?error=${code}`);
+  };
+  if (!googleAdminConfigured()) return fail('unconfigured');
+  if (req.query.error) return fail('denied');
+  const code = String(req.query.code || '');
+  const state = String(req.query.state || '');
+  if (!code || code.length > 2048 || !state || state.length > 200) return fail('invalid');
+  const tx = readOAuthTransaction(parseCookies(req.headers.cookie)[OAUTH_COOKIE], adminSessionSecret);
+  if (!tx) return fail('invalid');
+  const stateBuf = Buffer.from(state);
+  const expectedBuf = Buffer.from(tx.state);
+  if (stateBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(stateBuf, expectedBuf)) {
+    return fail('invalid');
+  }
+  try {
+    const origin = adminPublicOrigin(req, adminPublicOriginEnv);
+    const idToken = await exchangeGoogleCode({
+      code,
+      clientId: googleClientId,
+      clientSecret: googleClientSecret,
+      redirectUri: googleRedirectUri(origin, adminPath),
+      verifier: tx.verifier,
+    });
+    const profile = await verifyGoogleIdToken(idToken, googleClientId);
+    if (!profile) return fail('invalid');
+    if (!emailAllowed(profile.email, adminEmails)) return fail('not_allowed');
+    const token = createAdminSessionToken(adminSessionSecret, { email: profile.email });
+    res.setHeader('Set-Cookie', [
+      adminSessionCookie(token, { secure, path: adminPath }),
+      clearOAuthStateCookie({ secure, path: adminPath }),
+    ]);
+    console.log('admin_login', profile.email);
+    return res.redirect(adminPath);
+  } catch (error) {
+    console.error('admin_google_callback_error', error?.detail || error?.message || 'failed');
+    return fail('invalid');
+  }
+});
+
+panel.post('/api/logout', (req, res) => {
+  const secure = cookieSecure(req);
+  res.setHeader('Set-Cookie', [
+    clearAdminSessionCookie({ secure, path: adminPath }),
+    clearOAuthStateCookie({ secure, path: adminPath }),
+  ]);
+  return res.json({ ok: true });
+});
+
+panel.get('/api/overview', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const access = await loadAccess();
   const devices = await listDevices(devicesFile);
   const notice = publicOwnerMessage(await readOwnerMessage(ownerMessageFile));
   return res.json({
     ok: true,
+    adminEmail: req.adminEmail,
     access: publicAccessState(access),
     devices,
     notice,
   });
 });
 
-app.put('/admin/api/notice', async (req, res) => {
+panel.put('/api/notice', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const notice = await setOwnerMessage(ownerMessageFile, {
     text: req.body?.text,
@@ -948,13 +1132,13 @@ app.put('/admin/api/notice', async (req, res) => {
   return res.json({ ok: true, notice: publicOwnerMessage(notice) });
 });
 
-app.delete('/admin/api/notice', async (req, res) => {
+panel.delete('/api/notice', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const notice = await clearOwnerMessage(ownerMessageFile);
   return res.json({ ok: true, notice: publicOwnerMessage(notice) });
 });
 
-app.post('/admin/api/token/rotate', async (req, res) => {
+panel.post('/api/token/rotate', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const access = await rotateMasterToken(accessFile, masterTokenEnv, 24);
   return res.json({
@@ -964,7 +1148,7 @@ app.post('/admin/api/token/rotate', async (req, res) => {
   });
 });
 
-app.patch('/admin/api/devices/:id', async (req, res) => {
+panel.patch('/api/devices/:id', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const patch = {};
   if (Object.prototype.hasOwnProperty.call(req.body || {}, 'label')) {
@@ -980,13 +1164,73 @@ app.patch('/admin/api/devices/:id', async (req, res) => {
   return res.json({ ok: true, item: result.item });
 });
 
-app.delete('/admin/api/devices/:id', async (req, res) => {
+panel.delete('/api/devices/:id', async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const result = await removeDevice(devicesFile, req.params.id);
   if (!result.ok) {
     return res.status(result.status || 400).json({ error: result.error });
   }
   return res.json({ ok: true });
+});
+
+panel.get('/api/analytics', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const period = parsePeriod(req.query || {});
+  if (!period.ok) return res.status(400).json({ error: period.error });
+  try {
+    const events = await readAnalyticsEvents(analyticsDir, period.from, period.to);
+    const summary = summarizeAnalytics(events);
+    return res.json({
+      ok: true,
+      from: period.from,
+      to: period.to,
+      summary,
+    });
+  } catch (error) {
+    console.error('analytics_summary_error', error);
+    return res.status(500).json({ error: 'Не удалось загрузить статистику' });
+  }
+});
+
+panel.get('/api/analytics/export', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const period = parsePeriod(req.query || {});
+  if (!period.ok) return res.status(400).json({ error: period.error });
+  try {
+    const events = await readAnalyticsEvents(analyticsDir, period.from, period.to);
+    const summary = summarizeAnalytics(events);
+    const buffer = await buildAnalyticsWorkbook(summary, events, {
+      from: period.from,
+      to: period.to,
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="analytics-${stamp}.xlsx"`);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(buffer);
+  } catch (error) {
+    console.error('analytics_export_error', error);
+    return res.status(500).json({ error: 'Не удалось выгрузить Excel' });
+  }
+});
+
+if (adminPath) app.use(adminPath, panel);
+
+app.post('/api/track', trackLimiter, async (req, res) => {
+  try {
+    const normalized = normalizeEventInput(req.body || {}, {
+      ip: req.ip,
+      userAgent: req.get('user-agent') || '',
+    });
+    if (!normalized.ok) {
+      return res.status(400).json({ error: normalized.error });
+    }
+    await appendAnalyticsEvent(analyticsDir, normalized.event);
+    return res.status(204).end();
+  } catch (error) {
+    console.error('track_error', error);
+    return res.status(500).json({ error: 'Не удалось записать' });
+  }
 });
 
 app.post('/api/lead', leadLimiter, async (req, res) => {
@@ -1013,6 +1257,13 @@ app.post('/api/lead', leadLimiter, async (req, res) => {
       ip: req.ip,
     };
     await fs.appendFile(leadsFile, `${JSON.stringify(record)}\n`, 'utf8');
+    const track = normalizeEventInput(
+      { type: 'lead_submit', device: 'desktop', source: 'direct', path: '/' },
+      { ip: req.ip, userAgent: req.get('user-agent') || '' }
+    );
+    if (track.ok) {
+      await appendAnalyticsEvent(analyticsDir, track.event).catch(() => {});
+    }
     return res.status(201).json({ ok: true });
   } catch (error) {
     console.error('lead_error', error);
@@ -1101,13 +1352,24 @@ await ensureDemoWorks(worksFile, dataDir, distDir)
     console.error('ensure_demo_works_error', error);
   });
 
+adminSessionSecret = await ensureAdminSessionSecret(
+  adminSessionSecretFile,
+  process.env.ADMIN_SESSION_SECRET
+);
+
 app.listen(port, () => {
   console.log(`Svetlana cleaning server listening on http://localhost:${port}`);
   if (!masterTokenEnv) {
     console.warn('MASTER_TOKEN is not set — protected write routes will return 503 until access.json has a token');
   }
-  if (!adminPassword) {
-    console.warn('ADMIN_PASSWORD is not set — /admin will return 503');
+  if (!adminPath) {
+    console.warn('ADMIN_PATH is missing or not allowed — panel is disabled');
+  } else if (googleAdminConfigured()) {
+    console.log(`Google panel login ready for ${adminEmails.size} account(s)`);
+  } else if (adminPassword) {
+    console.log('Panel login uses the existing password until Google is configured');
+  } else {
+    console.warn('Panel has no login — set ADMIN_PASSWORD or Google OAuth variables');
   }
   if (!apkDownloadPin) {
     console.warn('APK_DOWNLOAD_PIN is not set — /app-download will return 503');
