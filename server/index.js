@@ -877,7 +877,10 @@ app.get('/api/works', async (_req, res) => {
   }
 });
 
-app.post('/api/works', worksWriteLimiter, (req, res) => {
+app.post('/api/works', worksWriteLimiter, async (req, res) => {
+  // Auth first: never let multer write temp files for strangers.
+  if (!(await requireMasterToken(req, res))) return;
+
   upload.single('photo')(req, res, async (err) => {
     try {
       if (err) {
@@ -885,10 +888,6 @@ app.post('/api/works', worksWriteLimiter, (req, res) => {
           ? 'Файл больше 4 МБ'
           : err.message || 'Ошибка загрузки';
         return res.status(400).json({ error: message });
-      }
-      if (!(await requireMasterToken(req, res))) {
-        await cleanupTemp(req.file);
-        return;
       }
       if (!req.file) {
         return res.status(400).json({ error: 'Прикрепите фото' });
