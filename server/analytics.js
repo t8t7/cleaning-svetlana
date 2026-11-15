@@ -463,12 +463,16 @@ export function summarizeAnalytics(events) {
         direct: 0,
         other: 0,
         phone: 0,
+        tablet: 0,
+        desktop: 0,
         total: 0,
       });
     }
     const day = byDayMap.get(parts.dateKey);
     day.total += 1;
     if (device === 'phone') day.phone += 1;
+    else if (device === 'tablet') day.tablet += 1;
+    else day.desktop += 1;
     if (source === 'avito') day.avito += 1;
     else if (source === 'yandex') day.yandex += 1;
     else if (source === 'google') day.google += 1;
@@ -541,7 +545,12 @@ export function summarizeAnalytics(events) {
       vk: day.vk,
       direct: day.direct,
       other: day.other,
+      phone: day.phone,
+      tablet: day.tablet,
+      desktop: day.desktop,
       phoneShare: day.total ? Math.round((day.phone / day.total) * 1000) / 10 : 0,
+      tabletShare: day.total ? Math.round((day.tablet / day.total) * 1000) / 10 : 0,
+      desktopShare: day.total ? Math.round((day.desktop / day.total) * 1000) / 10 : 0,
     }));
 
   const recent = [...events]
@@ -852,6 +861,8 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     'Прямой заход',
     'Другое',
     'Телефон %',
+    'Планшет %',
+    'Компьютер %',
   ];
   const dayWidths = {
     Дата: 14,
@@ -872,6 +883,8 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     'Прямой заход': 16,
     Другое: 12,
     'Телефон %': 13,
+    'Планшет %': 13,
+    'Компьютер %': 14,
   };
   daysSheet.addRow(dayHeaders);
   daysSheet.columns = dayHeaders.map((header) => ({
@@ -900,6 +913,8 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
       day.direct || 0,
       day.other || 0,
       day.phoneShare || 0,
+      day.tabletShare || 0,
+      day.desktopShare || 0,
     ]);
     paintBodyRow(row, { dateCol: 1, zebra: index % 2 === 1 });
   });
