@@ -486,17 +486,23 @@
       }
       const data = await api(`__PANEL__/api/analytics?${params}`);
       const s = data.summary || {};
+      const topLine = s.attention?.topLabel
+        ? `Больше всего внимания: ${s.attention.topLabel}.`
+        : 'Пока мало данных по зависаниям.';
       document.getElementById('statsMeta').textContent =
-        `С ${fmt(data.from)} по ${fmt(data.to)}`;
+        `С ${fmt(data.from)} по ${fmt(data.to)}. ${topLine} Считаем только если человек держал блок на экране от 3 сек.`;
       document.getElementById('statsCards').innerHTML = [
         ['Визиты', s.visits],
         ['Уникальные', s.unique],
         ['Звонки', s.calls],
         ['Конверсия %', s.conversion],
-        ['График', s.scheduleViews],
-        ['Цены', s.priceViews],
+        ['График, сек', s.scheduleSec],
+        ['Цены, сек', s.priceSec],
+        ['Отзывы, сек', s.reviewSec],
+        ['График, раз', s.scheduleViews],
+        ['Цены, раз', s.priceViews],
+        ['Отзывы, раз', s.reviewViews],
         ['Фото', s.photoOpens],
-        ['Отзывы', s.reviewViews],
       ].map(([label, value]) => `
         <div class="stat-card">
           <span class="meta">${escapeHtml(label)}</span>

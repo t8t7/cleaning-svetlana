@@ -36,20 +36,34 @@ test('append read summarize and excel', async () => {
     { type: 'call_click', visitorId: 'visitor123456', device: 'phone', source: 'avito' },
     { ip: '10.0.0.1', userAgent: 'Mozilla' }
   );
+  const c = normalizeEventInput(
+    { type: 'price_dwell', visitorId: 'visitor123456', device: 'phone', source: 'avito', ms: 12000 },
+    { ip: '10.0.0.1', userAgent: 'Mozilla' }
+  );
+  const short = normalizeEventInput(
+    { type: 'schedule_dwell', visitorId: 'visitor123456', device: 'phone', source: 'avito', ms: 500 },
+    { ip: '10.0.0.1', userAgent: 'Mozilla' }
+  );
   assert.equal(a.ok, true);
   assert.equal(b.ok, true);
+  assert.equal(c.ok, true);
+  assert.equal(short.ok, false);
+  assert.equal(c.event.ms, 12000);
   assert.match(a.event.ipHash, /^[a-f0-9]{16}$/);
   await appendAnalyticsEvent(dir, a.event);
   await appendAnalyticsEvent(dir, b.event);
+  await appendAnalyticsEvent(dir, c.event);
 
   const period = parsePeriod({ period: '30d' });
   assert.equal(period.ok, true);
   const events = await readAnalyticsEvents(dir, period.from, period.to);
-  assert.equal(events.length, 2);
+  assert.equal(events.length, 3);
   const summary = summarizeAnalytics(events);
   assert.equal(summary.visits, 1);
   assert.equal(summary.calls, 1);
   assert.equal(summary.unique, 1);
+  assert.equal(summary.priceSec, 12);
+  assert.equal(summary.attention.top, 'prices');
   assert.ok(summary.conversion > 0);
 
   const buffer = await buildAnalyticsWorkbook(summary, events, {

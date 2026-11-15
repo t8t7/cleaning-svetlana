@@ -5,23 +5,32 @@ import ExcelJS from 'exceljs';
 
 export const EVENT_TYPES = new Set([
   'page_view',
-  'schedule_open',
-  'price_view',
+  'schedule_dwell',
+  'price_dwell',
+  'reviews_dwell',
   'photo_open',
   'call_click',
-  'reviews_view',
 ]);
 
 export const DEVICES = new Set(['phone', 'tablet', 'desktop']);
 export const SOURCES = new Set(['avito', 'yandex', 'google', 'vk', 'direct', 'other']);
 
+const MIN_DWELL_MS = 3000;
+const MAX_DWELL_MS = 10 * 60 * 1000;
+
 const EVENT_LABELS = {
   page_view: 'Открыл сайт',
-  schedule_open: 'Смотрел график',
-  price_view: 'Смотрел цены',
+  schedule_dwell: 'Завис на графике',
+  price_dwell: 'Завис на ценах',
+  reviews_dwell: 'Завис на отзывах',
   photo_open: 'Открыл фото',
   call_click: 'Нажал Позвонить',
-  reviews_view: 'Смотрел отзывы',
+};
+
+const DWELL_SECTIONS = {
+  schedule_dwell: 'schedule',
+  price_dwell: 'prices',
+  reviews_dwell: 'reviews',
 };
 
 const DEVICE_LABELS = {
@@ -101,18 +110,27 @@ export function normalizeEventInput(body = {}, { ip = '', userAgent = '' } = {})
     visitorId = crypto.randomBytes(12).toString('hex');
   }
 
-  return {
-    ok: true,
-    event: {
-      at: new Date().toISOString(),
-      type,
-      device,
-      source,
-      visitorId,
-      ipHash: hashIp(ip),
-      path: sanitizeShort(body.path || '/', 120) || '/',
-    },
+  const event = {
+    at: new Date().toISOString(),
+    type,
+    device,
+    source,
+    visitorId,
+    ipHash: hashIp(ip),
+    path: sanitizeShort(body.path || '/', 120) || '/',
   };
+
+  if (DWELL_SECTIONS[type]) {
+    let ms = Number(body.ms ?? body.duration ?? 0);
+    if (!Number.isFinite(ms)) ms = 0;
+    ms = Math.round(ms);
+    if (ms < MIN_DWELL_MS) {
+      return { ok: false, error: 'Слишком коротко' };
+    }
+    event.ms = Math.min(MAX_DWELL_MS, ms);
+  }
+
+  return { ok: true, event };
 }
 
 function monthKeyFromIso(iso) {
@@ -266,6 +284,22 @@ function emptyCounter(keys) {
   return out;
 }
 
+function emptyAttention() {
+  return {
+    schedule: { count: 0, totalMs: 0, totalSec: 0, avgSec: 0 },
+    prices: { count: 0, totalMs: 0, totalSec: 0, avgSec: 0 },
+    reviews: { count: 0, totalMs: 0, totalSec: 0, avgSec: 0 },
+    top: null,
+    topLabel: '',
+  };
+}
+
+function finalizeAttentionBucket(bucket) {
+  bucket.totalSec = Math.round(bucket.totalMs / 1000);
+  bucket.avgSec = bucket.count ? Math.round(bucket.totalMs / bucket.count / 1000) : 0;
+  return bucket;
+}
+
 export function summarizeAnalytics(events) {
   const devices = emptyCounter([...DEVICES]);
   const sources = emptyCounter([...SOURCES]);
@@ -275,6 +309,7 @@ export function summarizeAnalytics(events) {
   const byDayMap = new Map();
   const uniqueVisitors = new Set();
   const callers = new Set();
+  const attention = emptyAttention();
 
   for (const event of events) {
     const type = EVENT_TYPES.has(event.type) ? event.type : null;
@@ -303,6 +338,9 @@ export function summarizeAnalytics(events) {
         schedule: 0,
         prices: 0,
         photos: 0,
+        scheduleSec: 0,
+        pricesSec: 0,
+        reviewsSec: 0,
         avito: 0,
         yandex: 0,
         google: 0,
@@ -330,11 +368,38 @@ export function summarizeAnalytics(events) {
       day.calls += 1;
       if (event.visitorId) callers.add(event.visitorId);
     }
-    if (type === 'reviews_view') day.reviews += 1;
-    if (type === 'schedule_open') day.schedule += 1;
-    if (type === 'price_view') day.prices += 1;
     if (type === 'photo_open') day.photos += 1;
+
+    const dwellKey = type ? DWELL_SECTIONS[type] : null;
+    if (dwellKey) {
+      const ms = Math.max(0, Number(event.ms) || 0);
+      if (ms >= MIN_DWELL_MS) {
+        attention[dwellKey].count += 1;
+        attention[dwellKey].totalMs += ms;
+        if (dwellKey === 'schedule') {
+          day.schedule += 1;
+          day.scheduleSec += Math.round(ms / 1000);
+        } else if (dwellKey === 'prices') {
+          day.prices += 1;
+          day.pricesSec += Math.round(ms / 1000);
+        } else if (dwellKey === 'reviews') {
+          day.reviews += 1;
+          day.reviewsSec += Math.round(ms / 1000);
+        }
+      }
+    }
   }
+
+  finalizeAttentionBucket(attention.schedule);
+  finalizeAttentionBucket(attention.prices);
+  finalizeAttentionBucket(attention.reviews);
+  const ranked = [
+    { key: 'schedule', label: 'график', sec: attention.schedule.totalSec },
+    { key: 'prices', label: 'цены', sec: attention.prices.totalSec },
+    { key: 'reviews', label: 'отзывы', sec: attention.reviews.totalSec },
+  ].sort((a, b) => b.sec - a.sec);
+  attention.top = ranked[0].sec > 0 ? ranked[0].key : null;
+  attention.topLabel = ranked[0].sec > 0 ? ranked[0].label : '';
 
   const visits = byType.page_view || 0;
   const calls = byType.call_click || 0;
@@ -352,6 +417,9 @@ export function summarizeAnalytics(events) {
       schedule: day.schedule,
       prices: day.prices,
       photos: day.photos,
+      scheduleSec: day.scheduleSec,
+      pricesSec: day.pricesSec,
+      reviewsSec: day.reviewsSec,
       avito: day.avito,
       yandex: day.yandex,
       google: day.google,
@@ -364,24 +432,37 @@ export function summarizeAnalytics(events) {
   const recent = [...events]
     .reverse()
     .slice(0, 40)
-    .map((event) => ({
-      at: event.at,
-      type: event.type,
-      label: EVENT_LABELS[event.type] || event.type,
-      device: event.device,
-      deviceLabel: DEVICE_LABELS[event.device] || event.device,
-      source: event.source,
-      sourceLabel: SOURCE_LABELS[event.source] || event.source,
-    }));
+    .map((event) => {
+      const base = EVENT_LABELS[event.type] || event.type;
+      const ms = Number(event.ms) || 0;
+      const label = ms > 0 ? `${base} · ${Math.round(ms / 1000)} сек` : base;
+      return {
+        at: event.at,
+        type: event.type,
+        ms,
+        label,
+        device: event.device,
+        deviceLabel: DEVICE_LABELS[event.device] || event.device,
+        source: event.source,
+        sourceLabel: SOURCE_LABELS[event.source] || event.source,
+      };
+    });
 
   return {
     visits,
     unique: uniqueVisitors.size,
     calls,
     conversion,
-    reviewViews: byType.reviews_view || 0,
-    scheduleViews: byType.schedule_open || 0,
-    priceViews: byType.price_view || 0,
+    attention,
+    scheduleViews: attention.schedule.count,
+    priceViews: attention.prices.count,
+    reviewViews: attention.reviews.count,
+    scheduleSec: attention.schedule.totalSec,
+    priceSec: attention.prices.totalSec,
+    reviewSec: attention.reviews.totalSec,
+    scheduleAvgSec: attention.schedule.avgSec,
+    priceAvgSec: attention.prices.avgSec,
+    reviewAvgSec: attention.reviews.avgSec,
     photoOpens: byType.photo_open || 0,
     callers: callers.size,
     devices,
@@ -506,9 +587,16 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     'Уникальные',
     'Звонки',
     'Конверсия %',
-    'Смотрели отзывы',
-    'Смотрели график',
-    'Смотрели цены',
+    'Больше внимания',
+    'График, раз',
+    'График, сек',
+    'График, ср. сек',
+    'Цены, раз',
+    'Цены, сек',
+    'Цены, ср. сек',
+    'Отзывы, раз',
+    'Отзывы, сек',
+    'Отзывы, ср. сек',
     'Открывали фото',
     'Авито',
     'Яндекс',
@@ -527,9 +615,16 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     Уникальные: 14,
     Звонки: 12,
     'Конверсия %': 14,
-    'Смотрели отзывы': 18,
-    'Смотрели график': 18,
-    'Смотрели цены': 16,
+    'Больше внимания': 16,
+    'График, раз': 13,
+    'График, сек': 13,
+    'График, ср. сек': 15,
+    'Цены, раз': 12,
+    'Цены, сек': 12,
+    'Цены, ср. сек': 14,
+    'Отзывы, раз': 13,
+    'Отзывы, сек': 13,
+    'Отзывы, ср. сек': 15,
     'Открывали фото': 18,
     Авито: 12,
     Яндекс: 12,
@@ -555,9 +650,16 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     summary.unique || 0,
     summary.calls || 0,
     summary.conversion || 0,
-    summary.reviewViews || 0,
+    summary.attention?.topLabel || '',
     summary.scheduleViews || 0,
+    summary.scheduleSec || 0,
+    summary.scheduleAvgSec || 0,
     summary.priceViews || 0,
+    summary.priceSec || 0,
+    summary.priceAvgSec || 0,
+    summary.reviewViews || 0,
+    summary.reviewSec || 0,
+    summary.reviewAvgSec || 0,
     summary.photoOpens || 0,
     summary.sources?.avito || 0,
     summary.sources?.yandex || 0,
@@ -585,9 +687,12 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     'Визиты',
     'Уникальные',
     'Звонки',
-    'Смотрели отзывы',
-    'Смотрели график',
-    'Смотрели цены',
+    'График, раз',
+    'График, сек',
+    'Цены, раз',
+    'Цены, сек',
+    'Отзывы, раз',
+    'Отзывы, сек',
     'Открывали фото',
     'Авито',
     'Яндекс',
@@ -602,9 +707,12 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     Визиты: 12,
     Уникальные: 14,
     Звонки: 12,
-    'Смотрели отзывы': 18,
-    'Смотрели график': 18,
-    'Смотрели цены': 16,
+    'График, раз': 13,
+    'График, сек': 13,
+    'Цены, раз': 12,
+    'Цены, сек': 12,
+    'Отзывы, раз': 13,
+    'Отзывы, сек': 13,
     'Открывали фото': 18,
     Авито: 12,
     Яндекс: 12,
@@ -627,9 +735,12 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
       day.visits || 0,
       day.unique || 0,
       day.calls || 0,
-      day.reviews || 0,
       day.schedule || 0,
+      day.scheduleSec || 0,
       day.prices || 0,
+      day.pricesSec || 0,
+      day.reviews || 0,
+      day.reviewsSec || 0,
       day.photos || 0,
       day.avito || 0,
       day.yandex || 0,
@@ -645,20 +756,23 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
   const eventsSheet = workbook.addWorksheet('События', {
     views: [{ state: 'frozen', ySplit: 1, xSplit: 1 }],
   });
-  const eventHeaders = ['Время', 'Событие', 'Устройство', 'Источник', 'Путь'];
+  const eventHeaders = ['Время', 'Событие', 'Секунд', 'Устройство', 'Источник', 'Путь'];
   eventsSheet.addRow(eventHeaders);
   eventsSheet.columns = [
     { header: 'Время', width: 18 },
-    { header: 'Событие', width: 20 },
+    { header: 'Событие', width: 22 },
+    { header: 'Секунд', width: 10 },
     { header: 'Устройство', width: 14 },
     { header: 'Источник', width: 16 },
     { header: 'Путь', width: 18 },
   ];
   paintHeaderRow(eventsSheet.getRow(1));
   events.forEach((event, index) => {
+    const ms = Number(event.ms) || 0;
     const row = eventsSheet.addRow([
       formatMoscowDateTime(event.at),
       EVENT_LABELS[event.type] || event.type,
+      ms > 0 ? Math.round(ms / 1000) : '',
       DEVICE_LABELS[event.device] || event.device,
       SOURCE_LABELS[event.source] || event.source,
       event.path || '/',

@@ -1,6 +1,7 @@
 (() => {
   const STORAGE_KEY = 'sv.vid.v1';
-  const once = new Set();
+  const MIN_DWELL_MS = 3000;
+  const MAX_DWELL_MS = 10 * 60 * 1000;
 
   const uuid = () => {
     if (crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '').slice(0, 24);
@@ -74,12 +75,6 @@
     }).catch(() => {});
   };
 
-  const onceSend = (key, type) => {
-    if (once.has(key)) return;
-    once.add(key);
-    send(type);
-  };
-
   send('page_view');
 
   document.addEventListener(
@@ -92,29 +87,56 @@
     true
   );
 
-  if ('IntersectionObserver' in window) {
-    const map = [
-      { sel: '#schedule', type: 'schedule_open' },
-      { sel: '#pricing', type: 'price_view' },
-      { sel: '#reviews', type: 'reviews_view' },
-    ];
+  const dwellWatchers = [];
+
+  const watchDwell = (sel, type) => {
+    const el = document.querySelector(sel);
+    if (!el || !('IntersectionObserver' in window)) return;
+
+    const state = {
+      type,
+      visible: false,
+      enteredAt: 0,
+      flush() {
+        if (!state.visible || !state.enteredAt) return;
+        const ms = Date.now() - state.enteredAt;
+        state.visible = false;
+        state.enteredAt = 0;
+        if (ms < MIN_DWELL_MS) return;
+        send(type, { ms: Math.min(ms, MAX_DWELL_MS) });
+      },
+    };
+    dwellWatchers.push(state);
+
     const io = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
-          if (!entry.isIntersecting || entry.intersectionRatio < 0.25) return;
-          const type = entry.target.getAttribute('data-track-type');
-          if (!type) return;
-          onceSend(`view:${type}`, type);
-          io.unobserve(entry.target);
+          const onScreen = entry.isIntersecting && entry.intersectionRatio >= 0.45;
+          if (onScreen) {
+            if (!state.visible) {
+              state.visible = true;
+              state.enteredAt = Date.now();
+            }
+          } else {
+            state.flush();
+          }
         });
       },
-      { threshold: 0.25 }
+      { threshold: [0, 0.25, 0.45, 0.7, 1] }
     );
-    map.forEach(({ sel, type }) => {
-      const el = document.querySelector(sel);
-      if (!el) return;
-      el.setAttribute('data-track-type', type);
-      io.observe(el);
-    });
-  }
+    io.observe(el);
+  };
+
+  watchDwell('#schedule', 'schedule_dwell');
+  watchDwell('#pricing', 'price_dwell');
+  watchDwell('#reviews', 'reviews_dwell');
+
+  const flushAll = () => {
+    dwellWatchers.forEach((state) => state.flush());
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) flushAll();
+  });
+  window.addEventListener('pagehide', flushAll);
 })();
