@@ -1353,6 +1353,7 @@ app.use(
   express.static(uploadsRoot, {
     maxAge: process.env.NODE_ENV === 'production' ? '7d' : 0,
     fallthrough: false,
+    dotfiles: 'deny',
   })
 );
 
@@ -1360,6 +1361,7 @@ app.use(
   express.static(distDir, {
     extensions: ['html'],
     maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,
+    dotfiles: 'deny',
   })
 );
 
