@@ -14,7 +14,7 @@ COPY package.json package-lock.json* ./
 # Production deps only: Astro stays in devDependencies (build stage), so nested sharp@0.34 is not shipped.
 RUN npm ci --omit=dev && mkdir -p data \
   && test ! -d node_modules/astro \
-  && node -e "const s=require('sharp/package.json'); if(s.version!=='0.35.5'){console.error('unexpected sharp',s.version); process.exit(1)}"
+  && node -e "const fs=require('fs'); const s=JSON.parse(fs.readFileSync('node_modules/sharp/package.json','utf8')); if(s.version!=='0.35.5'){console.error('unexpected sharp',s.version); process.exit(1)}"
 COPY --from=build /app/dist ./dist
 COPY server ./server
 EXPOSE 3000
