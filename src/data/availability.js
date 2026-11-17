@@ -21,17 +21,19 @@ const DAY_LABELS = {
 };
 
 /**
+ * Neutral SSR shell only — real schedule comes from GET /api/availability.
+ * Never bake demo "busy" here: static HTML would flash red before JS loads.
  * status: free | busy | partial
  * busyRanges: [{ from: 10, to: 14 }] in hours (24h)
  */
 export const weekPlanBase = [
-  { key: 'mon', label: 'Пн', shortDate: '10.11', status: 'partial', busyRanges: [{ from: 9, to: 13 }] },
-  { key: 'tue', label: 'Вт', shortDate: '11.11', status: 'busy', busyRanges: [{ from: 8, to: 20 }] },
+  { key: 'mon', label: 'Пн', shortDate: '10.11', status: 'free', busyRanges: [] },
+  { key: 'tue', label: 'Вт', shortDate: '11.11', status: 'free', busyRanges: [] },
   { key: 'wed', label: 'Ср', shortDate: '12.11', status: 'free', busyRanges: [] },
-  { key: 'thu', label: 'Чт', shortDate: '13.11', status: 'partial', busyRanges: [{ from: 14, to: 18 }] },
+  { key: 'thu', label: 'Чт', shortDate: '13.11', status: 'free', busyRanges: [] },
   { key: 'fri', label: 'Пт', shortDate: '14.11', status: 'free', busyRanges: [] },
-  { key: 'sat', label: 'Сб', shortDate: '15.11', status: 'partial', busyRanges: [{ from: 10, to: 15 }] },
-  { key: 'sun', label: 'Вс', shortDate: '16.11', status: 'busy', busyRanges: [{ from: 8, to: 20 }] },
+  { key: 'sat', label: 'Сб', shortDate: '15.11', status: 'free', busyRanges: [] },
+  { key: 'sun', label: 'Вс', shortDate: '16.11', status: 'free', busyRanges: [] },
 ];
 
 export function getBusinessNow(now = new Date()) {

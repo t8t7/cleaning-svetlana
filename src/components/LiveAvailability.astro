@@ -11,15 +11,15 @@ const live = getLiveStatus(weekPlan);
 const initialDayKey = live.today.key;
 ---
 
-<section class="live-avail" id="schedule" aria-labelledby="live-avail-title">
+<section class="live-avail is-pending" id="schedule" aria-labelledby="live-avail-title" data-availability-pending>
   <div class="container">
     <div class="live-card reveal">
-      <div class={`live-pulse state-${live.state}`} data-live-pulse>
+      <div class="live-pulse state-loading" data-live-pulse>
         <span class="pulse-dot" aria-hidden="true"></span>
         <div class="live-pulse-copy">
           <p class="live-kicker">{availabilityMeta.note}</p>
-          <h2 id="live-avail-title" data-live-title>{live.title}</h2>
-          <p class="live-detail" data-live-detail>{live.detail}</p>
+          <h2 id="live-avail-title" data-live-title>Загружаем расписание…</h2>
+          <p class="live-detail" data-live-detail>Секунду — подтягиваем актуальное с телефона мастера</p>
         </div>
         <a class="btn btn-primary live-call" href={`tel:${site.phoneTel}`}>Позвонить</a>
       </div>
@@ -28,23 +28,19 @@ const initialDayKey = live.today.key;
         {weekPlan.map((day) => (
           <button
             type="button"
-            class={`day-chip status-${day.status}`}
+            class="day-chip status-free"
             role="tab"
             aria-selected={day.key === initialDayKey ? 'true' : 'false'}
             data-day-key={day.key}
-            data-day-status={day.status}
-            data-busy={JSON.stringify(day.busyRanges)}
+            data-day-status="free"
+            data-busy="[]"
             data-label={`${day.label}, ${day.shortDate}`}
           >
             <span class="day-name">{day.label}</span>
             <span class="day-date">{day.shortDate}</span>
             <span class="day-state">
-              <span class="day-state-full">
-                {day.status === 'free' ? 'Свободно' : day.status === 'busy' ? 'Занято' : 'Частично'}
-              </span>
-              <span class="day-state-short" aria-hidden="true">
-                {day.status === 'free' ? 'Своб.' : day.status === 'busy' ? 'Занят.' : 'Часть'}
-              </span>
+              <span class="day-state-full">…</span>
+              <span class="day-state-short" aria-hidden="true">…</span>
             </span>
           </button>
         ))}
@@ -55,24 +51,15 @@ const initialDayKey = live.today.key;
           <h3 data-day-heading>
             {live.today.label}, {live.today.shortDate}
           </h3>
-          <p data-day-summary>
-            {live.today.status === 'free'
-              ? 'Весь день свободен для записи'
-              : live.today.status === 'busy'
-                ? 'В этот день мест нет'
-                : 'Есть свободные окна между заказами'}
-          </p>
+          <p data-day-summary>Подтягиваем актуальные окна…</p>
         </div>
 
-        <div class="slots" data-slots>
+        <div class="slots is-skeleton" data-slots aria-busy="true">
           {buildDaySlots(live.today).map((slot) => (
-            <div class={`slot ${slot.busy ? 'is-busy' : 'is-free'}`}>
+            <div class="slot is-pending-slot">
               <span class="slot-time">{slot.label}</span>
-              <span
-                class={`slot-dot ${slot.busy ? 'busy' : 'free'}`}
-                aria-hidden="true"
-              ></span>
-              <strong>{slot.busy ? 'Занято' : 'Свободно'}</strong>
+              <span class="slot-dot pending" aria-hidden="true"></span>
+              <strong>…</strong>
             </div>
           ))}
         </div>
@@ -230,15 +217,23 @@ const initialDayKey = live.today.key;
     });
   };
 
+  const markAvailabilityReady = () => {
+    root?.classList.remove('is-pending');
+    root?.removeAttribute('data-availability-pending');
+    slots?.classList.remove('is-skeleton');
+    slots?.removeAttribute('aria-busy');
+  };
+
   const applyAvailability = (data, { preserveSelection = false } = {}) => {
     const plan = withBusinessWeekDates(Array.isArray(data.weekPlan) ? data.weekPlan : []);
     if (!plan.length || !weekStrip) return;
 
     const live = data.live || {};
     if (pulse) {
-      pulse.classList.remove('state-free', 'state-busy', 'state-busy-now');
+      pulse.classList.remove('state-free', 'state-busy', 'state-busy-now', 'state-loading');
       pulse.classList.add(`state-${live.state || 'free'}`);
     }
+    markAvailabilityReady();
     if (liveTitle) liveTitle.textContent = live.title || 'Сейчас свободна';
     if (liveDetail) liveDetail.textContent = live.detail || '';
     if (liveKicker && data.meta?.note) liveKicker.textContent = data.meta.note;
@@ -328,12 +323,19 @@ const initialDayKey = live.today.key;
 
   bindChips();
   refreshSsrDates();
-  selectTodayChip();
+  // Do not paint SSR/demo slots as truth — wait for /api/availability first.
 
   loadAvailability()
     .catch(() => {
       refreshSsrDates();
       selectTodayChip();
+      markAvailabilityReady();
+      if (pulse) {
+        pulse.classList.remove('state-loading');
+        pulse.classList.add('state-free');
+      }
+      if (liveTitle) liveTitle.textContent = 'Сейчас свободна';
+      if (liveDetail) liveDetail.textContent = 'Не удалось обновить график — позвоните, уточним окна';
     })
     .finally(() => {
       connectAvailabilityStream();
@@ -385,6 +387,12 @@ const initialDayKey = live.today.key;
       linear-gradient(135deg, #9a3412 0%, #7c2d12 100%);
   }
 
+  .live-pulse.state-loading {
+    background:
+      radial-gradient(500px 180px at 0% 0%, rgba(148, 163, 184, 0.2), transparent 60%),
+      linear-gradient(135deg, #334155 0%, #1e293b 100%);
+  }
+
   .pulse-dot {
     width: 12px;
     height: 12px;
@@ -399,6 +407,25 @@ const initialDayKey = live.today.key;
   .state-busy-now .pulse-dot {
     background: #fdba74;
     box-shadow: 0 0 0 0 rgba(253, 186, 116, 0.7);
+  }
+
+  .state-loading .pulse-dot {
+    background: #cbd5e1;
+    box-shadow: 0 0 0 0 rgba(203, 213, 225, 0.55);
+  }
+
+  .live-avail.is-pending .week-strip,
+  .live-avail.is-pending .day-panel {
+    opacity: 0.72;
+  }
+
+  .live-avail :global(.slot.is-pending-slot) {
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+  }
+
+  .live-avail :global(.slot-dot.pending) {
+    background: #cbd5e1;
   }
 
   .live-kicker {
