@@ -33,9 +33,33 @@
   };
 
   const source = () => {
-    const utm = `${utmSource} ${utmMedium}`.toLowerCase();
+    const utmSrc = String(utmSource || '').toLowerCase();
+    const utmMed = String(utmMedium || '').toLowerCase();
+    const utm = `${utmSrc} ${utmMed}`;
     const ref = String(document.referrer || '').toLowerCase();
     if (/avito/.test(utm) || /avito\.ru/.test(ref)) return 'avito';
+    if (
+      /2gis/.test(utmSrc) ||
+      /2gis/.test(utm) ||
+      /(?:^|\/\/|\.)2gis\.(?:ru|com)\b/.test(ref) ||
+      /go\.2gis\.com/.test(ref)
+    ) {
+      return '2gis';
+    }
+    if (
+      /google[_-]?maps|\bgmaps\b/.test(utmSrc) ||
+      (utmSrc === 'google' && /map/.test(utmMed)) ||
+      /maps\.google\.|google\.[a-z.]+\/maps|maps\.app\.goo\.gl|goo\.gl\/maps/.test(ref)
+    ) {
+      return 'google_maps';
+    }
+    if (
+      /yandex[_-]?maps|\bymaps\b/.test(utmSrc) ||
+      (/(?:^|\b)(?:yandex|ya\.ru)\b/.test(utmSrc) && /map/.test(utmMed)) ||
+      /maps\.yandex\.|yandex\.[a-z.]+\/maps|ya\.ru\/maps|n\.maps\.yandex/.test(ref)
+    ) {
+      return 'yandex_maps';
+    }
     if (/yandex|ya\.ru/.test(utm) || /yandex\.|ya\.ru/.test(ref)) return 'yandex';
     if (/google/.test(utm) || /google\./.test(ref)) return 'google';
     if (/\bvk\b|vkontakte/.test(utm) || /(?:^|\/\/|\.)vk\.(?:com|ru|me)\b/.test(ref)) return 'vk';

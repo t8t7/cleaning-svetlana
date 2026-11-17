@@ -21,6 +21,18 @@ test('detectSource understands avito search and vk', () => {
   assert.equal(detectSource({ referrer: '' }), 'direct');
 });
 
+test('detectSource separates maps from search', () => {
+  assert.equal(detectSource({ utmSource: '2gis' }), '2gis');
+  assert.equal(detectSource({ referrer: 'https://2gis.ru/moscow/firm/1' }), '2gis');
+  assert.equal(detectSource({ utmSource: 'google_maps' }), 'google_maps');
+  assert.equal(detectSource({ utmSource: 'google', utmMedium: 'maps' }), 'google_maps');
+  assert.equal(detectSource({ referrer: 'https://www.google.com/maps' }), 'google_maps');
+  assert.equal(detectSource({ utmSource: 'yandex_maps' }), 'yandex_maps');
+  assert.equal(detectSource({ referrer: 'https://yandex.ru/maps/org/1' }), 'yandex_maps');
+  assert.equal(detectSource({ referrer: 'https://www.google.com/search?q=x' }), 'google');
+  assert.equal(detectSource({ referrer: 'https://yandex.ru/search/?text=x' }), 'yandex');
+});
+
 test('normalizeEventInput rejects unknown type', () => {
   const bad = normalizeEventInput({ type: 'scroll' }, { ip: '1.2.3.4' });
   assert.equal(bad.ok, false);

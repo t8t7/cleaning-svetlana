@@ -44,7 +44,17 @@ export const EVENT_TYPES = new Set([
 ]);
 
 export const DEVICES = new Set(['phone', 'tablet', 'desktop']);
-export const SOURCES = new Set(['avito', 'yandex', 'google', 'vk', 'direct', 'other']);
+export const SOURCES = new Set([
+  'avito',
+  'yandex',
+  'google',
+  'vk',
+  '2gis',
+  'google_maps',
+  'yandex_maps',
+  'direct',
+  'other',
+]);
 
 const MIN_DWELL_MS = 3000;
 const MAX_DWELL_MS = 10 * 60 * 1000;
@@ -75,6 +85,9 @@ const SOURCE_LABELS = {
   yandex: 'Яндекс',
   google: 'Google',
   vk: 'VK',
+  '2gis': '2GIS',
+  google_maps: 'Google Maps',
+  yandex_maps: 'Яндекс.Карты',
   direct: 'Прямой заход',
   other: 'Другое',
 };
@@ -178,9 +191,37 @@ export function detectDeviceFromUa(userAgent = '', width = 0) {
 }
 
 export function detectSource({ referrer = '', utmSource = '', utmMedium = '' } = {}) {
-  const utm = `${utmSource} ${utmMedium}`.toLowerCase();
+  const utmSrc = String(utmSource || '').toLowerCase();
+  const utmMed = String(utmMedium || '').toLowerCase();
+  const utm = `${utmSrc} ${utmMed}`;
   const ref = String(referrer || '').toLowerCase();
+
   if (/avito/.test(utm) || /avito\.ru/.test(ref)) return 'avito';
+
+  // Maps before generic search — otherwise google/yandex catch maps too.
+  if (
+    /2gis/.test(utmSrc) ||
+    /2gis/.test(utm) ||
+    /(?:^|\/\/|\.)2gis\.(?:ru|com)\b/.test(ref) ||
+    /go\.2gis\.com/.test(ref)
+  ) {
+    return '2gis';
+  }
+  if (
+    /google[_-]?maps|\bgmaps\b/.test(utmSrc) ||
+    (utmSrc === 'google' && /map/.test(utmMed)) ||
+    /maps\.google\.|google\.[a-z.]+\/maps|maps\.app\.goo\.gl|goo\.gl\/maps/.test(ref)
+  ) {
+    return 'google_maps';
+  }
+  if (
+    /yandex[_-]?maps|\bymaps\b/.test(utmSrc) ||
+    (/(?:^|\b)(?:yandex|ya\.ru)\b/.test(utmSrc) && /map/.test(utmMed)) ||
+    /maps\.yandex\.|yandex\.[a-z.]+\/maps|ya\.ru\/maps|n\.maps\.yandex/.test(ref)
+  ) {
+    return 'yandex_maps';
+  }
+
   if (/yandex|ya\.ru/.test(utm) || /yandex\.|ya\.ru/.test(ref)) return 'yandex';
   if (/google/.test(utm) || /google\./.test(ref)) return 'google';
   if (/\bvk\b|vkontakte/.test(utm) || /(?:^|\/\/|\.)vk\.(?:com|ru|me)\b/.test(ref)) return 'vk';
@@ -460,6 +501,9 @@ export function summarizeAnalytics(events) {
         yandex: 0,
         google: 0,
         vk: 0,
+        '2gis': 0,
+        google_maps: 0,
+        yandex_maps: 0,
         direct: 0,
         other: 0,
         phone: 0,
@@ -477,6 +521,9 @@ export function summarizeAnalytics(events) {
     else if (source === 'yandex') day.yandex += 1;
     else if (source === 'google') day.google += 1;
     else if (source === 'vk') day.vk += 1;
+    else if (source === '2gis') day['2gis'] += 1;
+    else if (source === 'google_maps') day.google_maps += 1;
+    else if (source === 'yandex_maps') day.yandex_maps += 1;
     else if (source === 'direct') day.direct += 1;
     else day.other += 1;
     if (type === 'page_view') {
@@ -543,6 +590,9 @@ export function summarizeAnalytics(events) {
       yandex: day.yandex,
       google: day.google,
       vk: day.vk,
+      '2gis': day['2gis'],
+      google_maps: day.google_maps,
+      yandex_maps: day.yandex_maps,
       direct: day.direct,
       other: day.other,
       phone: day.phone,
@@ -762,6 +812,9 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     'Яндекс',
     'Google',
     'VK',
+    '2GIS',
+    'Google Maps',
+    'Яндекс.Карты',
     'Прямой заход',
     'Другое',
     'Телефон %',
@@ -790,6 +843,9 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     Яндекс: 12,
     Google: 12,
     VK: 10,
+    '2GIS': 10,
+    'Google Maps': 14,
+    'Яндекс.Карты': 14,
     'Прямой заход': 16,
     Другое: 12,
     'Телефон %': 13,
@@ -825,6 +881,9 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     summary.sources?.yandex || 0,
     summary.sources?.google || 0,
     summary.sources?.vk || 0,
+    summary.sources?.['2gis'] || 0,
+    summary.sources?.google_maps || 0,
+    summary.sources?.yandex_maps || 0,
     summary.sources?.direct || 0,
     summary.sources?.other || 0,
     summary.deviceShare?.phone || 0,
@@ -858,6 +917,9 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     'Яндекс',
     'Google',
     'VK',
+    '2GIS',
+    'Google Maps',
+    'Яндекс.Карты',
     'Прямой заход',
     'Другое',
     'Телефон %',
@@ -880,6 +942,9 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
     Яндекс: 12,
     Google: 12,
     VK: 10,
+    '2GIS': 10,
+    'Google Maps': 14,
+    'Яндекс.Карты': 14,
     'Прямой заход': 16,
     Другое: 12,
     'Телефон %': 13,
@@ -910,6 +975,9 @@ export async function buildAnalyticsWorkbook(summary, events, { from, to } = {})
       day.yandex || 0,
       day.google || 0,
       day.vk || 0,
+      day['2gis'] || 0,
+      day.google_maps || 0,
+      day.yandex_maps || 0,
       day.direct || 0,
       day.other || 0,
       day.phoneShare || 0,
