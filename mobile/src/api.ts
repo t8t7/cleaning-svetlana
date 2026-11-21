@@ -201,6 +201,38 @@ export async function updateWorkCaption(
   return body.item;
 }
 
+export type ContactPayload = {
+  phoneDisplay: string;
+  phoneTel: string;
+  updatedAt?: string | null;
+  ok?: boolean;
+};
+
+export async function fetchContact(serverUrl: string): Promise<ContactPayload> {
+  const res = await fetch(`${apiBase(serverUrl)}/api/contact`, {
+    headers: { Accept: 'application/json' },
+    cache: 'no-store',
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Не удалось загрузить телефон (${res.status})`);
+  return body;
+}
+
+export async function saveContact(
+  serverUrl: string,
+  token: string,
+  phone: string
+): Promise<ContactPayload> {
+  const res = await fetch(`${apiBase(serverUrl)}/api/contact`, {
+    method: 'PUT',
+    headers: await authHeaders(token, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ phone }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Не удалось сохранить телефон (${res.status})`);
+  return body;
+}
+
 export async function fetchPrices(serverUrl: string, token: string): Promise<PricesPayload> {
   const res = await fetch(`${apiBase(serverUrl)}/api/prices`, {
     headers: await authHeaders(token),

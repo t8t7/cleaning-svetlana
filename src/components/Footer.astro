@@ -12,7 +12,7 @@ import { site } from '../data/site.js';
       <h3>Контакты</h3>
       <p>{site.region}, {site.city}</p>
       <p>{site.address}</p>
-      <p><a href={`tel:${site.phoneTel}`}>{site.phoneDisplay}</a></p>
+      <p><a href={`tel:${site.phoneTel}`} data-phone-link data-phone-display>{site.phoneDisplay}</a></p>
       <p>
         <a href={site.avitoUrl} target="_blank" rel="noopener noreferrer">Мы на Авито</a>
       </p>

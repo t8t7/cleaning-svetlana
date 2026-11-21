@@ -22,8 +22,8 @@ import { site } from '../data/site.js';
     </nav>
 
     <div class="header-actions">
-      <a class="phone" href={`tel:${site.phoneTel}`}>{site.phoneDisplay}</a>
-      <a class="btn btn-primary header-cta" href={`tel:${site.phoneTel}`}>Позвонить</a>
+      <a class="phone" href={`tel:${site.phoneTel}`} data-phone-link data-phone-display>{site.phoneDisplay}</a>
+      <a class="btn btn-primary header-cta" href={`tel:${site.phoneTel}`} data-phone-link>Позвонить</a>
       <button class="menu-btn" type="button" aria-expanded="false" aria-controls="mobile-nav" id="menu-toggle">
         <span class="sr-only">Меню</span>
         <span></span><span></span><span></span>
@@ -38,8 +38,8 @@ import { site } from '../data/site.js';
     <a href="#frames">Фото работ</a>
     <a href="#reviews">Отзывы</a>
     <a href="#faq">FAQ</a>
-    <a href={`tel:${site.phoneTel}`}>{site.phoneDisplay}</a>
-    <a class="btn btn-primary" href={`tel:${site.phoneTel}`}>Позвонить</a>
+    <a href={`tel:${site.phoneTel}`} data-phone-link data-phone-display>{site.phoneDisplay}</a>
+    <a class="btn btn-primary" href={`tel:${site.phoneTel}`} data-phone-link>Позвонить</a>
   </div>
 </header>
 

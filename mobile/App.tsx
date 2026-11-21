@@ -21,9 +21,11 @@ import {
   absoluteUrl,
   deleteWork,
   fetchAvailability,
+  fetchContact,
   fetchWorks,
   pingServer,
   saveAvailability,
+  saveContact,
   syncDevice,
   updateWorkCaption,
   uploadWork,
@@ -97,6 +99,8 @@ export default function App() {
   const [remoteVersion, setRemoteVersion] = useState<AppVersionInfo | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInstalling, setUpdateInstalling] = useState(false);
+  const [sitePhone, setSitePhone] = useState('+7 (904) 563-81-70');
+  const [phoneSaving, setPhoneSaving] = useState(false);
 
   const showToast = useCallback((text: string, kind: ToastKind = 'ok', ms = TOAST_MS) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -190,13 +194,28 @@ export default function App() {
     }
   }, [remoteVersion, settings.masterToken, settings.serverUrl, updateAvailable]);
 
+  const loadSitePhone = useCallback(async (serverUrl = settings.serverUrl) => {
+    if (!serverUrl.trim()) return;
+    try {
+      const data = await fetchContact(serverUrl);
+      if (data.phoneDisplay) setSitePhone(data.phoneDisplay);
+    } catch {
+      /* keep last known phone */
+    }
+  }, [settings.serverUrl]);
+
   useEffect(() => {
     (async () => {
       const loaded = await loadSettings();
       setSettings(loaded);
       setDraftSettings(loaded);
+      await loadSitePhone(loaded.serverUrl);
     })();
-  }, []);
+  }, [loadSitePhone]);
+
+  useEffect(() => {
+    if (tab === 'settings') loadSitePhone();
+  }, [tab, loadSitePhone]);
 
   const runDeviceSync = useCallback(async () => {
     if (!settings.serverUrl.trim() || !settings.masterToken.trim()) return;
@@ -321,6 +340,27 @@ export default function App() {
     setMessage('Настройки сохранены');
     setTab('schedule');
     checkForAppUpdate(next.serverUrl);
+  };
+
+  const onSaveSitePhone = async () => {
+    if (!settings.masterToken.trim()) {
+      showToast('Сначала сохраните токен мастера', 'err');
+      setTab('settings');
+      return;
+    }
+    setPhoneSaving(true);
+    setMessage('');
+    try {
+      const data = await saveContact(settings.serverUrl, settings.masterToken, sitePhone);
+      setSitePhone(data.phoneDisplay || sitePhone);
+      showToast(`Телефон на сайте: ${data.phoneDisplay || sitePhone}`);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : 'Не удалось сохранить телефон';
+      setMessage(text);
+      showToast(text, 'err');
+    } finally {
+      setPhoneSaving(false);
+    }
   };
 
   const onPing = async () => {
@@ -739,6 +779,28 @@ export default function App() {
               <Text style={styles.primaryText}>Сохранить</Text>
             </Pressable>
           </View>
+
+          <Text style={styles.sectionLabel}>Телефон на сайте</Text>
+          <Text style={styles.hint}>
+            Этот номер увидят клиенты на сайте. Можно менять в любой момент — сайт обновится сразу.
+          </Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="phone-pad"
+            autoCorrect={false}
+            value={sitePhone}
+            onChangeText={setSitePhone}
+            placeholder="8 904 563-81-70"
+          />
+          <Pressable
+            style={[styles.primaryBtn, phoneSaving && styles.btnDisabled]}
+            onPress={onSaveSitePhone}
+            disabled={phoneSaving}
+          >
+            <Text style={styles.primaryText}>
+              {phoneSaving ? 'Сохранение…' : 'Сохранить телефон на сайте'}
+            </Text>
+          </Pressable>
 
           <Text style={styles.sectionLabel}>Версия приложения</Text>
           <Text style={styles.hint}>

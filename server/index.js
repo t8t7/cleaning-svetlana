@@ -99,6 +99,12 @@ import {
   readAnalyticsEvents,
   summarizeAnalytics,
 } from './analytics.js';
+import {
+  publicContact,
+  readContact,
+  validateContactPayload,
+  writeContactAtomic,
+} from './contact.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
@@ -110,6 +116,7 @@ const availabilityFile = path.join(dataDir, 'availability.json');
 const pricesFile = path.join(dataDir, 'prices.json');
 const calculatorFile = path.join(dataDir, 'calculator.json');
 const serviceCardsFile = path.join(dataDir, 'service-cards.json');
+const contactFile = path.join(dataDir, 'contact.json');
 const worksFile = path.join(dataDir, 'works.json');
 const accessFile = path.join(dataDir, 'access.json');
 const devicesFile = path.join(dataDir, 'devices.json');
@@ -774,14 +781,16 @@ app.get('/api/pricing/stream', async (req, res) => {
   sendSseEvent(res, 'connected', { ok: true });
 
   try {
-    const [prices, services, calculator] = await Promise.all([
+    const [prices, services, calculator, contact] = await Promise.all([
       readPrices(pricesFile),
       readServiceCards(serviceCardsFile),
       readCalculator(calculatorFile),
+      readContact(contactFile),
     ]);
     sendSseEvent(res, 'prices', publicPrices(prices));
     sendSseEvent(res, 'services', publicServiceCards(services));
     sendSseEvent(res, 'calculator', publicCalculator(calculator));
+    sendSseEvent(res, 'contact', publicContact(contact));
   } catch (error) {
     console.error('pricing_stream_seed_error', error);
   }
@@ -800,6 +809,37 @@ app.get('/api/pricing/stream', async (req, res) => {
   };
   req.on('close', cleanup);
   req.on('error', cleanup);
+});
+
+app.get('/api/contact', async (_req, res) => {
+  try {
+    const data = await readContact(contactFile);
+    res.set('Cache-Control', 'no-store');
+    return res.json(publicContact(data));
+  } catch (error) {
+    console.error('contact_read_error', error);
+    return res.status(500).json({ error: 'Не удалось прочитать телефон' });
+  }
+});
+
+app.put('/api/contact', pricesWriteLimiter, async (req, res) => {
+  try {
+    if (!(await requireMasterToken(req, res))) return;
+
+    const checked = validateContactPayload(req.body);
+    if (!checked.ok) {
+      return res.status(400).json({ error: checked.error });
+    }
+
+    await writeContactAtomic(contactFile, checked.data);
+    const publicPayload = publicContact(checked.data);
+    broadcastPricingEvent('contact', publicPayload);
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, ...publicPayload });
+  } catch (error) {
+    console.error('contact_write_error', error);
+    return res.status(500).json({ error: 'Не удалось сохранить телефон' });
+  }
 });
 
 app.get('/api/calculator', async (_req, res) => {
